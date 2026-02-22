@@ -611,7 +611,7 @@ def contas_fixas():
             valor_str = request.form.get('valor')
             valor = _parse_brl_value(valor_str, None) if valor_str else None
             vencimento_data = (request.form.get('vencimento_data') or '').strip() or None
-            data_fim_str = request.form.get('data_fim')
+            data_fim_str = (request.form.get('data_fim') or '').strip() or None
             
             if not nome:
                 flash('Informe o nome da conta.', 'warning')

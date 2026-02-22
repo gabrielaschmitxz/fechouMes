@@ -7,6 +7,17 @@ from finance_app.database import get_connection
 from finance_app.models import ContaFixa
 
 
+def _normalizar_data_iso(data_str: str | None) -> str | None:
+    valor = (data_str or "").strip()
+    if not valor:
+        return None
+    try:
+        date.fromisoformat(valor)
+        return valor
+    except ValueError:
+        return None
+
+
 def mes_ano_atual() -> Tuple[int, int]:
     hoje = date.today()
     return hoje.month, hoje.year
@@ -104,6 +115,10 @@ def criar_conta_fixa(
 ) -> None:
     if mes is None or ano is None:
         mes, ano = mes_ano_atual()
+
+    vencimento_data = _normalizar_data_iso(vencimento_data)
+    data_fim = _normalizar_data_iso(data_fim)
+
     conn = get_connection()
     cur = conn.cursor()
     if vencimento_data:
@@ -150,6 +165,9 @@ def atualizar_conta_fixa(
     vencimento_data: str | None,
     data_fim: str | None,
 ) -> bool:
+    vencimento_data = _normalizar_data_iso(vencimento_data)
+    data_fim = _normalizar_data_iso(data_fim)
+
     vencimento_dia = None
     if vencimento_data:
         try:
