@@ -1,0 +1,204 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Contas Fixas - Fechou Mês{% endblock %}
+
+{% block content %}
+<h1 style="color: #2d3748; margin-bottom: 1.5rem;">Contas Fixas</h1>
+
+<!-- Filtro -->
+<form method="GET" style="margin-bottom: 2rem;">
+    <div class="row form-row">
+        <div class="col-2">
+            <div class="form-group">
+                <label>Mês</label>
+                <select name="mes">
+                    {% set meses = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == mes %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Ano</label>
+                <input type="number" name="ano" value="{{ ano }}" min="2000" max="2100">
+            </div>
+        </div>
+        <div class="col-2 form-action-col">
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+        </div>
+    </div>
+</form>
+
+<!-- Nova conta -->
+<h3>Nova conta fixa</h3>
+<form method="POST" style="margin-bottom: 1.5rem;">
+    <input type="hidden" name="action" value="nova_conta">
+    <div class="row form-row">
+        <div class="col-2">
+            <div class="form-group">
+                <label>Nome</label>
+                <input type="text" name="nome" required>
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Categoria</label>
+                <select name="categoria">
+                    <option value="">(Selecione)</option>
+                    <option value="Estudos">Estudos</option>
+                    <option value="Energia">Energia</option>
+                    <option value="Gás">Gás</option>
+                    <option value="Telefone">Telefone</option>
+                    <option value="Internet">Internet</option>
+                    <option value="Aluguel">Aluguel</option>
+                    <option value="Lojas">Lojas</option>
+                    <option value="Lazer">Lazer</option>
+                    <option value="Outro">Outro</option>
+                </select>
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Valor (R$)</label>
+                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" placeholder="Opcional">
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Vencimento (opcional)</label>
+                <input type="date" name="vencimento_data">
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Data fim (opcional)</label>
+                <input type="date" name="data_fim">
+            </div>
+        </div>
+        <div class="col-2 form-action-col">
+            <button type="submit" class="btn btn-primary">Cadastrar conta</button>
+        </div>
+    </div>
+</form>
+
+<!-- Contas do Mês -->
+<h3>Contas do mês</h3>
+{% if contas %}
+<div class="table">
+    <table>
+        <thead>
+            <tr>
+                <th>Nome</th>
+                <th>Categoria</th>
+                <th>Valor</th>
+                <th>Vencimento</th>
+                <th>Data fim</th>
+                <th>Status</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in contas %}
+            <tr>
+                <td>{{ c.nome }}</td>
+                <td>{{ c.categoria or '-' }}</td>
+                <td>R$ {{ "{:,.2f}".format(c.valor_padrao or 0) }}</td>
+                <td>{{ c.vencimento_data or (c.vencimento_dia if c.vencimento_dia else '-') }}</td>
+                <td>{{ c.data_fim or '-' }}</td>
+                <td style="color: {% if c.status == 'Pago' %}green{% else %}red{% endif %};">
+                    {{ c.status }}
+                </td>
+                <td>
+                    <button
+                        type="button"
+                        class="btn btn-warning btn-sm"
+                        data-toggle="collapse"
+                        data-target="#editar-conta-{{ c.id }}"
+                        aria-expanded="false"
+                        aria-controls="editar-conta-{{ c.id }}">
+                        Editar
+                    </button>
+                    <form method="POST" style="display: inline; margin-left: 0.25rem;">
+                        <input type="hidden" name="action" value="excluir_conta">
+                        <input type="hidden" name="conta_id" value="{{ c.id }}">
+                        <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                    </form>
+                    {% if c.status == 'Pendente' %}
+                    <form method="POST" style="display: inline; margin-left: 0.5rem;">
+                        <input type="hidden" name="action" value="marcar_pago"> 
+                        <input type="hidden" name="conta_id" value="{{ c.id }}">
+                        <button type="submit" class="btn btn-success btn-sm">Marcar como pago</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr class="collapse" id="editar-conta-{{ c.id }}">
+                <td colspan="7">
+                    <form method="POST">
+                        <input type="hidden" name="action" value="editar_conta">
+                        <input type="hidden" name="conta_id" value="{{ c.id }}">
+                        <div class="row form-row">
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Nome</label>
+                                    <input type="text" name="nome" value="{{ c.nome }}" required>
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Categoria</label>
+                                    <select name="categoria">
+                                        <option value="" {% if not c.categoria %}selected{% endif %}>(Selecione)</option>
+                                        <option value="Estudos" {% if c.categoria == 'Estudos' %}selected{% endif %}>Estudos</option>
+                                        <option value="Energia" {% if c.categoria == 'Energia' %}selected{% endif %}>Energia</option>
+                                        <option value="Gás" {% if c.categoria == 'Gás' %}selected{% endif %}>Gás</option>
+                                        <option value="Telefone" {% if c.categoria == 'Telefone' %}selected{% endif %}>Telefone</option>
+                                        <option value="Internet" {% if c.categoria == 'Internet' %}selected{% endif %}>Internet</option>
+                                        <option value="Aluguel" {% if c.categoria == 'Aluguel' %}selected{% endif %}>Aluguel</option>
+                                        <option value="Lojas" {% if c.categoria == 'Lojas' %}selected{% endif %}>Lojas</option>
+                                        <option value="Lazer" {% if c.categoria == 'Lazer' %}selected{% endif %}>Lazer</option>
+                                        <option value="Outro" {% if c.categoria == 'Outro' %}selected{% endif %}>Outro</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Valor (R$)</label>
+                                    <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" value="{{ '%.2f'|format(c.valor_padrao) if c.valor_padrao is not none else '' }}">
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Vencimento</label>
+                                    <input type="date" name="vencimento_data" value="{{ c.vencimento_data or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Data fim</label>
+                                    <input type="date" name="data_fim" value="{{ c.data_fim or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-2 form-action-col">
+                                <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                            </div>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div style="margin-top: 1rem;">
+    <strong>Total: R$ {{ "{:,.2f}".format(totais['total']) }}</strong><br>
+    <small>Pendente: R$ {{ "{:,.2f}".format(totais['total_pendente']) }} | Pago: R$ {{ "{:,.2f}".format(totais['total_pago']) }}</small>
+</div>
+{% else %}
+<p>Nenhuma conta cadastrada para este mês.</p>
+{% endif %}
+{% endblock %}
+
+

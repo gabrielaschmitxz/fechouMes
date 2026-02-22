@@ -1,0 +1,295 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Cartão - Fechou Mês{% endblock %}
+
+{% block content %}
+<h1 style="color: #2d3748; margin-bottom: 1.5rem;">Cartão de Crédito</h1>
+
+<ul class="nav nav-tabs" role="tablist" style="margin-bottom: 1rem;">
+    <li class="nav-item">
+        <a class="nav-link active" data-toggle="tab" href="#tab-cartao-principal" role="tab">Cartão</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" data-toggle="tab" href="#tab-cartao-lancamentos" role="tab">Todos os lançamentos</a>
+    </li>
+</ul>
+
+<div class="tab-content">
+<div class="tab-pane fade show active" id="tab-cartao-principal" role="tabpanel">
+
+<!-- Configuração -->
+<div class="section-title">Configuração do Cartão</div>
+<form method="POST">
+    <input type="hidden" name="action" value="config">
+    <div class="row form-row">
+        <div class="col-3">
+            <div class="form-group">
+                <label>Limite total (R$)</label>
+                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="limite" step="100" min="0" value="{{ cfg.limite_total or 0 }}">
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Dia de fechamento</label>
+                <input type="number" name="dia_fechamento" min="1" max="31" value="{{ cfg.dia_fechamento }}">
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Dia de vencimento</label>
+                <input type="number" name="dia_vencimento" min="1" max="31" value="{{ cfg.dia_vencimento }}">
+            </div>
+        </div>
+        <div class="col-3 form-action-col">
+            <button type="submit" class="btn btn-primary">Salvar configuração</button>
+        </div>
+    </div>
+</form>
+
+<br>
+
+<!-- Fatura Atual -->
+<div class="section-title">Fatura Atual</div>
+<div style="margin: -0.35rem 0 0.55rem; font-size: 0.98rem; font-weight: 600; color: #2d3748;">
+    Status: <span style="color: {% if cfg.fatura_paga %}#16a34a{% else %}#dc2626{% endif %};">
+        {% if cfg.fatura_paga %}Pago{% else %}Pendente{% endif %}
+    </span>
+</div>
+<div class="row cartao-totais">
+    <div class="col-3">
+        <div class="metric-container">
+            <div class="card-title">Total meu</div>
+            <div class="card-value" style="color: #1e3a8a;">R$ {{ "{:,.2f}".format(info['total_meu']) }}</div>
+        </div>
+    </div>
+    <div class="col-3">
+        <div class="metric-container">
+            <div class="card-title">Total terceiros</div>
+            <div class="card-value" style="color: #1e3a8a;">R$ {{ "{:,.2f}".format(info['total_terceiros']) }}</div>
+        </div>
+    </div>
+    <div class="col-3">
+        <div class="metric-container">
+            <div class="card-title">Total geral</div>
+            <div class="card-value" style="color: #1e3a8a;">R$ {{ "{:,.2f}".format(info['total_geral']) }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="cartao-actions">
+    <form method="POST">
+        <input type="hidden" name="action" value="marcar_paga">
+        <button type="submit" class="btn btn-success btn-sm">Marcar Fatura como Paga</button>
+    </form>
+    <form method="POST">
+        <input type="hidden" name="action" value="reabrir">
+        <button type="submit" class="btn btn-secondary btn-sm">Reabrir fatura (desfazer)</button>
+    </form>
+</div>
+
+<br>
+
+<!-- Nova Compra -->
+<div class="section-title">Nova Compra no Cartão</div>
+<form method="POST">
+    <input type="hidden" name="action" value="compra">
+    <div class="form-group">
+        <label>Descrição</label>
+        <input type="text" name="descricao" required>
+    </div>
+    <div class="row">
+        <div class="col-3">
+            <div class="form-group">
+                <label id="label_valor_compra">Valor total (R$)</label>
+                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" step="10" min="0" required>
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Pessoa (opcional)</label>
+                <select name="pessoa_id">
+                    <option value="">(Nosso)</option>
+                    {% for p in pessoas %}
+                        <option value="{{ p.id }}">{{ p.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Tipo</label>
+                <select name="tipo" id="tipo_compra" onchange="toggleParcelas()">
+                    <option value="avista">À vista</option>
+                    <option value="parcelado">Parcelado</option>
+                </select>
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Nº de parcelas</label>
+                <input type="number" name="total_parcelas" id="total_parcelas" min="1" value="1">
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Tipo de valor</label>
+                <select name="modo_valor" id="modo_valor" onchange="toggleParcelas()">
+                    <option value="total">Valor total</option>
+                    <option value="parcela">Valor da parcela</option>
+                </select>
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Parcela atual</label>
+                <input type="number" name="parcela_atual" id="parcela_atual" min="1" value="1">
+            </div>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Registrar compra</button>
+</form>
+
+</div>
+
+<div class="tab-pane fade" id="tab-cartao-lancamentos" role="tabpanel">
+    <div class="section-title">Todos os lançamentos</div>
+    {% if lancamentos_todos %}
+    <div class="table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Descrição</th>
+                    <th>Valor</th>
+                    <th>Parcelas</th>
+                    <th>Status</th>
+                    <th>Pessoa</th>
+                    <th>Período</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for l in lancamentos_todos %}
+                <tr>
+                    <td>{% if l.tipo == 'avista' %}À vista{% else %}Parcelado{% endif %}</td>
+                    <td>{{ l.descricao }}</td>
+                    <td>R$ {{ "{:,.2f}".format(l.valor) }}</td>
+                    <td>{{ l.parcelas_label }}</td>
+                    <td>{{ l.status }}</td>
+                    <td>{{ l.pessoa_nome }}</td>
+                    <td>{{ l.periodo }}</td>
+                    <td>
+                        <button
+                            type="button"
+                            class="btn btn-warning btn-sm"
+                            data-toggle="collapse"
+                            data-target="#editar-cartao-{{ l.tipo }}-{{ l.id }}"
+                            aria-expanded="false"
+                            aria-controls="editar-cartao-{{ l.tipo }}-{{ l.id }}">
+                            Editar
+                        </button>
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="action" value="excluir_lancamento">
+                            <input type="hidden" name="tipo" value="{{ l.tipo }}">
+                            <input type="hidden" name="lancamento_id" value="{{ l.id }}">
+                            <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                        </form>
+                    </td>
+                </tr>
+                <tr class="collapse" id="editar-cartao-{{ l.tipo }}-{{ l.id }}">
+                    <td colspan="8">
+                        <form method="POST">
+                            <input type="hidden" name="action" value="editar_lancamento">
+                            <input type="hidden" name="tipo" value="{{ l.tipo }}">
+                            <input type="hidden" name="lancamento_id" value="{{ l.id }}">
+                            <div class="row form-row">
+                                <div class="col-3">
+                                    <div class="form-group">
+                                        <label>Descrição</label>
+                                        <input type="text" name="descricao" value="{{ l.descricao }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-2">
+                                    <div class="form-group">
+                                        <label>{% if l.tipo == 'parcelado' %}Valor parcela (R$){% else %}Valor (R$){% endif %}</label>
+                                        <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" value="{{ '%.2f'|format(l.valor) }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-2">
+                                    <div class="form-group">
+                                        <label>Pessoa</label>
+                                        <select name="pessoa_id">
+                                            <option value="" {% if l.pessoa_id is none %}selected{% endif %}>(Nosso)</option>
+                                            {% for p in pessoas %}
+                                                <option value="{{ p.id }}" {% if p.id == l.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                {% if l.tipo == 'parcelado' %}
+                                <div class="col-1">
+                                    <div class="form-group">
+                                        <label>Parcela atual</label>
+                                        <input type="number" name="parcela_atual" min="1" value="{{ l.parcela_atual }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-1">
+                                    <div class="form-group">
+                                        <label>Total</label>
+                                        <input type="number" name="total_parcelas" min="1" value="{{ l.total_parcelas }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-2">
+                                    <div class="form-group">
+                                        <label>Status</label>
+                                        <select name="status">
+                                            <option value="Ativa" {% if l.status == 'Ativa' %}selected{% endif %}>Ativa</option>
+                                            <option value="Finalizada" {% if l.status == 'Finalizada' %}selected{% endif %}>Finalizada</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                <div class="col-1 form-action-col">
+                                    <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                </div>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>Nenhum lançamento encontrado.</p>
+    {% endif %}
+</div>
+</div>
+
+<script>
+function toggleParcelas() {
+    const tipo = document.getElementById('tipo_compra').value;
+    const parcelas = document.getElementById('total_parcelas');
+    const parcelaAtual = document.getElementById('parcela_atual');
+    const modoValor = document.getElementById('modo_valor');
+    const labelValor = document.getElementById('label_valor_compra');
+    if (tipo === 'avista') {
+        parcelas.value = 1;
+        parcelas.disabled = true;
+        parcelaAtual.value = 1;
+        parcelaAtual.disabled = true;
+        modoValor.value = 'total';
+        modoValor.disabled = true;
+        labelValor.textContent = 'Valor total (R$)';
+    } else {
+        parcelas.disabled = false;
+        parcelaAtual.disabled = false;
+        modoValor.disabled = false;
+        labelValor.textContent = modoValor.value === 'parcela' ? 'Valor da parcela (R$)' : 'Valor total (R$)';
+    }
+}
+toggleParcelas();
+</script>
+{% endblock %}
+
+

@@ -1,0 +1,232 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Pessoas - Fechou Mês{% endblock %}
+
+{% block content %}
+<h1 style="color: #2d3748; margin-bottom: 1.5rem;">Pessoas / Terceiros</h1>
+
+<!-- Filtro -->
+<form method="GET" style="margin-bottom: 2rem;">
+    <div class="row form-row">
+        <div class="col-2">
+            <div class="form-group">
+                <label>Mês</label>
+                <select name="mes">
+                    {% set meses = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == mes %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Ano</label>
+                <input type="number" name="ano" value="{{ ano }}" min="2000" max="2100">
+            </div>
+        </div>
+        <div class="col-2 form-action-col">
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+        </div>
+    </div>
+</form>
+
+<!-- Abas Pessoas -->
+<ul class="nav nav-tabs" role="tablist" style="margin-bottom: 1rem;">
+    <li class="nav-item">
+        <a class="nav-link active" data-toggle="tab" href="#tab-cadastro-pessoa" role="tab">Cadastro</a>
+    </li>
+    {% for r in resumos %}
+    {% if not r.pessoa.padrao %}
+    <li class="nav-item">
+        <a class="nav-link" data-toggle="tab" href="#tab-pessoa-{{ r.pessoa.id }}" role="tab">{{ r.pessoa.nome }}</a>
+    </li>
+    {% endif %}
+    {% endfor %}
+</ul>
+
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="tab-cadastro-pessoa" role="tabpanel">
+        <h3>Nova pessoa</h3>
+        <form method="POST" class="compact-person-form">
+            <input type="hidden" name="action" value="nova_pessoa">
+            <div class="row form-row">
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Nome da pessoa</label>
+                        <input type="text" name="nome" required>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button type="submit" class="btn btn-primary">Cadastrar pessoa</button>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+        <hr>
+
+        <h3>Pessoas cadastradas</h3>
+        {% if resumos %}
+        <div class="table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Pessoa</th>
+                        <th>Total do mês</th>
+                        <th>Total pago</th>
+                        <th>Saldo pendente</th>
+                        <th>Status</th>
+                        <th>Padrão</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in resumos %}
+                    <tr>
+                        <td>{{ r.pessoa.nome }}</td>
+                        <td>R$ {{ "{:,.2f}".format(r.total_mes) }}</td>
+                        <td>R$ {{ "{:,.2f}".format(r.total_pago) }}</td>
+                        <td style="color: {% if r.saldo_pend > 0 %}#ff6a00{% else %}green{% endif %};">
+                            R$ {{ "{:,.2f}".format(r.saldo_pend) }}
+                        </td>
+                        <td>
+                            {% if r.pessoa.ativo %}
+                            <span class="btn btn-success btn-sm" style="cursor: default; opacity: 0.95;">Ativa</span>
+                            {% else %}
+                            <span class="btn btn-secondary btn-sm" style="cursor: default; opacity: 0.95;">Inativa</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="action" value="toggle_padrao">
+                                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                                <button type="submit" class="btn btn-outline-primary btn-sm" title="Alternar padrão">
+                                    {% if r.pessoa.padrao %}★{% else %}☆{% endif %}
+                                </button>
+                            </form>
+                        </td>
+                        <td>
+                            <button class="btn btn-warning btn-sm" type="button" data-toggle="collapse" data-target="#editForm{{ r.pessoa.id }}" aria-expanded="false" aria-controls="editForm{{ r.pessoa.id }}">
+                                Editar
+                            </button>
+                            <span style="display: inline-block; width: 0.35rem;"></span>
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="action" value="excluir_pessoa">
+                                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="editForm{{ r.pessoa.id }}">
+                        <td colspan="7">
+                            <form method="POST" class="p-3 border rounded bg-light mb-2">
+                                <input type="hidden" name="action" value="editar_pessoa">
+                                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                                <div class="form-group">
+                                    <label for="novo_nome_{{ r.pessoa.id }}">Novo Nome</label>
+                                    <input type="text" class="form-control" id="novo_nome_{{ r.pessoa.id }}" name="novo_nome" value="{{ r.pessoa.nome }}" required>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" class="form-check-input" id="novo_ativo_{{ r.pessoa.id }}" name="novo_ativo" {% if r.pessoa.ativo %}checked{% endif %}>
+                                    <label class="form-check-label" for="novo_ativo_{{ r.pessoa.id }}">Ativo</label>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-sm mt-2">Salvar Alterações</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>Nenhuma pessoa cadastrada.</p>
+        {% endif %}
+    </div>
+
+    {% for r in resumos %}
+    {% if not r.pessoa.padrao %}
+    <div class="tab-pane fade" id="tab-pessoa-{{ r.pessoa.id }}" role="tabpanel">
+        <div style="margin-top: 0.5rem;">
+            <h4>Receber pagamento</h4>
+            {% set contas = contas_status_por_pessoa.get(r.pessoa.id, []) %}
+            {% if contas %}
+            <form method="POST">
+                <input type="hidden" name="action" value="registrar_pagamento_itens">
+                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+
+                <div style="margin: 0.5rem 0;">
+                    <label style="font-weight: 600; margin: 0;">
+                        <input type="checkbox" onclick="toggleAllContas('{{ r.pessoa.id }}', this.checked)">
+                        Marcar tudo como pago
+                    </label>
+                </div>
+
+                <div class="table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Pagar</th>
+                                <th>Conta</th>
+                                <th>Valor</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for conta in contas %}
+                            <tr>
+                                <td>
+                                    {% if not conta.pago %}
+                                    <input
+                                        type="checkbox"
+                                        name="conta_paga"
+                                        value="{{ conta.token }}"
+                                        class="conta-paga-{{ r.pessoa.id }}"
+                                    >
+                                    {% endif %}
+                                </td>
+                                <td>{{ conta.descricao }}</td>
+                                <td>R$ {{ "{:,.2f}".format(conta.valor) }}</td>
+                                <td>
+                                    {% if conta.pago %}
+                                    <span class="btn btn-success btn-sm" style="cursor: default; opacity: 0.9;">Pago</span>
+                                    {% else %}
+                                    <span class="btn btn-secondary btn-sm" style="cursor: default; opacity: 0.9;">Pendente</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top: 0.75rem;">
+                    <button type="submit" class="btn btn-success">Registrar contas pagas</button>
+                </div>
+            </form>
+            {% else %}
+            <p>Nenhuma conta para esta pessoa no mês selecionado.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<div style="margin-top: 1rem;">
+    <strong>Total geral do mês: R$ {{ "{:,.2f}".format(total_mes_geral) }}</strong><br>
+    <small>Total pago: R$ {{ "{:,.2f}".format(total_pago_geral) }} | Saldo pendente: R$ {{ "{:,.2f}".format(saldo_pend_geral) }}</small>
+</div>
+
+<script>
+function toggleAllContas(pessoaId, checked) {
+    const checkboxes = document.querySelectorAll('.conta-paga-' + pessoaId);
+    checkboxes.forEach(cb => { cb.checked = checked; });
+}
+</script>
+{% endblock %}
+
+
+
+

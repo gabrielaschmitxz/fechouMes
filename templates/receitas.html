@@ -1,0 +1,564 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Receitas - Fechou Mês{% endblock %}
+
+{% block content %}
+<h1 style="color: #2d3748; margin-bottom: 1.5rem;">Receitas</h1>
+
+<ul class="nav nav-tabs" role="tablist" style="margin-bottom: 1rem;">
+    <li class="nav-item">
+        <a class="nav-link active" data-toggle="tab" href="#tab-receita-cadastro" role="tab">Cadastro</a>
+    </li>
+    {% for saldo in saldos %}
+    <li class="nav-item">
+        <a class="nav-link" data-toggle="tab" href="#tab-receita-{{ saldo.id }}" role="tab">{{ saldo.nome }}</a>
+    </li>
+    {% endfor %}
+</ul>
+
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="tab-receita-cadastro" role="tabpanel">
+        {% if not saldos_padrao %}
+        <div class="alert alert-warning" style="margin-bottom: 1rem;">
+            Nenhuma pessoa padrão ativa encontrada. Marque uma pessoa como padrão em Pessoas/Terceiros.
+        </div>
+        {% endif %}
+
+        <div class="section-title">Registrar Salário</div>
+        <form method="POST">
+            <input type="hidden" name="action" value="salario">
+            <div class="row form-row">
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Pessoa</label>
+                        <select name="pessoa" required {% if not saldos_padrao %}disabled{% endif %}>
+                            {% for saldo in saldos_padrao %}
+                                <option value="{{ saldo.nome }}">{{ saldo.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Valor (R$)</label>
+                        <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" required>
+                    </div>
+                </div>
+                <div class="col-2 form-action-col">
+                    <button type="submit" class="btn btn-primary" {% if not saldos_padrao %}disabled{% endif %}>Registrar</button>
+                </div>
+            </div>
+        </form>
+
+        <div style="margin-top: 0.75rem;">
+            <h5 style="margin-bottom: 0.5rem;">Salários Recebidos</h5>
+            <div class="table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pessoa</th>
+                            <th>Data</th>
+                            <th>Status</th>
+                            <th>Valor</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set nss = namespace(has_salario=false) %}
+                        {% for x in lancamentos_extras_tabela %}
+                        {% if x.categoria == 'salario' %}
+                        {% set nss.has_salario = true %}
+                        <tr>
+                            <td>{{ x.extra_nome|replace('Salário - ', '') }}</td>
+                            <td>{{ x.data_ref }}</td>
+                            <td>
+                                {% if x.status == 'Agendado' %}
+                                    <span style="color:#ff6a00;font-weight:600;">Agendado</span>
+                                {% else %}
+                                    <span style="color:#16a34a;font-weight:600;">Recebido</span>
+                                {% endif %}
+                            </td>
+                            <td>R$ {{ "{:,.2f}".format(x.valor) }}</td>
+                            <td>
+                                <button
+                                    type="button"
+                                    class="btn btn-warning btn-sm"
+                                    data-toggle="collapse"
+                                    data-target="#editar-salario-{{ x.lancamento_id }}"
+                                    aria-expanded="false"
+                                    aria-controls="editar-salario-{{ x.lancamento_id }}">
+                                    Editar
+                                </button>
+                                <form method="POST" style="display: inline;">
+                                    <input type="hidden" name="action" value="excluir_lancamento">
+                                    <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
+                                    <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                </form>
+                            </td>
+                        </tr>
+                        <tr class="collapse" id="editar-salario-{{ x.lancamento_id }}">
+                            <td colspan="5">
+                                <form method="POST">
+                                    <input type="hidden" name="action" value="editar_lancamento">
+                                    <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
+                                    <input type="hidden" name="categoria" value="salario">
+                                    <div class="row form-row">
+                                        <div class="col-4">
+                                            <div class="form-group">
+                                                <label>Descrição</label>
+                                                <input type="text" name="descricao" value="{{ x.descricao }}">
+                                            </div>
+                                        </div>
+                                        <div class="col-2">
+                                            <div class="form-group">
+                                                <label>Valor (R$)</label>
+                                                <input
+                                                    type="text"
+                                                    class="money-input"
+                                                    inputmode="numeric"
+                                                    autocomplete="off"
+                                                    name="valor"
+                                                    value="{{ '%.2f'|format(x.valor) }}"
+                                                    required>
+                                            </div>
+                                        </div>
+                                        <div class="col-2 form-action-col">
+                                            <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                        {% if not nss.has_salario %}
+                        <tr>
+                            <td colspan="5">Nenhum lançamento de salário.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <br>
+
+        <div class="section-title">Registrar Receita</div>
+        <form method="POST">
+            <input type="hidden" name="action" value="extra">
+            <div class="form-group">
+                <label>Receita</label>
+                <select name="extra_select" id="extra_select" onchange="toggleExtraFields()">
+                    <option value="novo">Novo</option>
+                    {% for extra in extras %}
+                        <option
+                            value="{{ extra.descricao }}"
+                            data-categoria="{{ extra.categoria }}"
+                            data-data-recebimento="{{ extra.data_recebimento or '' }}">
+                            {{ extra.descricao }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" id="descricao_nova">
+                <label>Descrição da nova receita</label>
+                <input type="text" name="descricao_nova" id="descricao_nova_input">
+            </div>
+            <div class="form-group" id="descricao_existente" style="display: none;">
+                <input type="hidden" name="descricao" id="descricao_existente_input">
+            </div>
+            <div class="row form-row">
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Categoria</label>
+                        <select name="categoria_extra" id="categoria_extra" onchange="toggleValorExtraLabel()" required>
+                            <option value="extra">Extra</option>
+                            <option value="beneficio">Benefício</option>
+                            <option value="bonus">Bônus</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Data recebimento</label>
+                        <input type="date" name="data_recebimento">
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label id="label_valor_extra">Valor adicional (R$)</label>
+                        <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" required>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Adicionar ao saldo de</label>
+                        <select name="pessoa_saldo" required {% if not saldos_padrao %}disabled{% endif %}>
+                            {% for saldo in saldos_padrao %}
+                                <option value="{{ saldo.nome }}">{{ saldo.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2 form-action-col">
+                    <button type="submit" class="btn btn-primary" {% if not saldos_padrao %}disabled{% endif %}>Registrar Receita</button>
+                </div>
+            </div>
+        </form>
+
+        <br>
+        <h4>Receitas Agendadas</h4>
+        {% if extras %}
+        <div class="table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Categoria</th>
+                        <th>Data recebimento</th>
+                        <th>Status</th>
+                        <th>Valor padrão</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set ns = namespace(has_agendada=false) %}
+                    {% for extra in extras %}
+                    {% if extra.data_recebimento and extra.data_recebimento > hoje_iso %}
+                    {% set ns.has_agendada = true %}
+                    <tr>
+                        <td>{{ extra.descricao }}</td>
+                        <td>{{ extra.categoria|capitalize }}</td>
+                        <td>{{ extra.data_recebimento or '-' }}</td>
+                        <td>
+                            <span style="color:#ff6a00;font-weight:600;">Agendado</span>
+                        </td>
+                        <td>
+                            {% if extra.valor_padrao is not none %}
+                                R$ {{ "{:,.2f}".format(extra.valor_padrao) }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button
+                                type="button"
+                                class="btn btn-warning btn-sm"
+                                data-toggle="collapse"
+                                data-target="#editar-extra-{{ extra.id }}"
+                                aria-expanded="false"
+                                aria-controls="editar-extra-{{ extra.id }}">
+                                Editar
+                            </button>
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="action" value="excluir_receita_extra">
+                                <input type="hidden" name="extra_id" value="{{ extra.id }}">
+                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="editar-extra-{{ extra.id }}">
+                        <td colspan="6">
+                            <form method="POST">
+                                <input type="hidden" name="action" value="editar_receita_extra">
+                                <input type="hidden" name="extra_id" value="{{ extra.id }}">
+                                <div class="row form-row">
+                                    <div class="col-2">
+                                        <div class="form-group">
+                                            <label>Categoria</label>
+                                            <select name="categoria_extra_edit" required>
+                                                <option value="extra" {% if extra.categoria == 'extra' %}selected{% endif %}>Extra</option>
+                                                <option value="beneficio" {% if extra.categoria == 'beneficio' %}selected{% endif %}>Benefício</option>
+                                                <option value="bonus" {% if extra.categoria == 'bonus' %}selected{% endif %}>Bônus</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="form-group">
+                                            <label>Nome</label>
+                                            <input type="text" name="descricao" value="{{ extra.descricao }}" required>
+                                        </div>
+                                    </div>
+                                    <div class="col-2">
+                                        <div class="form-group">
+                                            <label>Data recebimento</label>
+                                            <input type="date" name="data_recebimento_edit" value="{{ extra.data_recebimento or '' }}">
+                                        </div>
+                                    </div>
+                                    <div class="col-2">
+                                        <div class="form-group">
+                                            <label>Valor padrão (R$)</label>
+                                            <input
+                                                type="text"
+                                                class="money-input"
+                                                inputmode="numeric"
+                                                autocomplete="off"
+                                                name="valor_padrao"
+                                                value="{{ '%.2f'|format(extra.valor_padrao) if extra.valor_padrao is not none else '' }}">
+                                        </div>
+                                    </div>
+                                    <div class="col-2 form-action-col">
+                                        <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                    {% if not ns.has_agendada %}
+                    <tr>
+                        <td colspan="6">Nenhuma receita agendada.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>Nenhuma receita agendada.</p>
+        {% endif %}
+
+        <br>
+        <h4>Receitas Recebidas</h4>
+        {% if lancamentos_extras_tabela %}
+        <div class="table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Receita</th>
+                        <th>Categoria</th>
+                        <th>Data</th>
+                        <th>Status</th>
+                        <th>Valor recebido</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set nsr = namespace(has_recebido=false) %}
+                    {% for x in lancamentos_extras_tabela %}
+                    {% if x.status == 'Recebido' and x.categoria != 'salario' %}
+                    {% set nsr.has_recebido = true %}
+                    <tr>
+                        <td>{{ x.descricao or x.extra_nome }}</td>
+                        <td>{{ x.categoria|capitalize }}</td>
+                        <td>{{ x.data_ref }}</td>
+                        <td>
+                            {% if x.status == 'Agendado' %}
+                                <span style="color:#ff6a00;font-weight:600;">Agendado</span>
+                            {% else %}
+                                <span style="color:#11998e;font-weight:600;">Recebido</span>
+                            {% endif %}
+                        </td>
+                        <td>R$ {{ "{:,.2f}".format(x.valor) }}</td>
+                        <td>
+                            <button
+                                type="button"
+                                class="btn btn-warning btn-sm"
+                                data-toggle="collapse"
+                                data-target="#editar-recebida-{{ x.lancamento_id }}"
+                                aria-expanded="false"
+                                aria-controls="editar-recebida-{{ x.lancamento_id }}">
+                                Editar
+                            </button>
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="action" value="excluir_lancamento">
+                                <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
+                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="editar-recebida-{{ x.lancamento_id }}">
+                        <td colspan="6">
+                            <form method="POST">
+                                <input type="hidden" name="action" value="editar_lancamento">
+                                <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
+                                <div class="row form-row">
+                                    <div class="col-2">
+                                        <div class="form-group">
+                                            <label>Categoria</label>
+                                            <select name="categoria" required>
+                                                <option value="salario" {% if x.categoria == 'salario' %}selected{% endif %}>Salário</option>
+                                                <option value="beneficio" {% if x.categoria == 'beneficio' %}selected{% endif %}>Benefício</option>
+                                                <option value="bonus" {% if x.categoria == 'bonus' %}selected{% endif %}>Bônus</option>
+                                                <option value="extra" {% if x.categoria == 'extra' %}selected{% endif %}>Extra</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="form-group">
+                                            <label>Descrição</label>
+                                            <input type="text" name="descricao" value="{{ x.descricao }}">
+                                        </div>
+                                    </div>
+                                    <div class="col-2">
+                                        <div class="form-group">
+                                            <label>Valor (R$)</label>
+                                            <input
+                                                type="text"
+                                                class="money-input"
+                                                inputmode="numeric"
+                                                autocomplete="off"
+                                                name="valor"
+                                                value="{{ '%.2f'|format(x.valor) }}"
+                                                required>
+                                        </div>
+                                    </div>
+                                    <div class="col-2 form-action-col">
+                                        <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                    {% if not nsr.has_recebido %}
+                    <tr>
+                        <td colspan="6">Nenhuma receita recebida.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>Nenhum lançamento de receita ainda.</p>
+        {% endif %}
+    </div>
+
+    {% for saldo in saldos %}
+    <div class="tab-pane fade" id="tab-receita-{{ saldo.id }}" role="tabpanel">
+        <h4>Lançamentos da conta</h4>
+        {% set lancs_conta = lancamentos_por_saldo.get(saldo.id, []) %}
+        {% set ns_conta = namespace(total=0.0, has=false) %}
+        {% for l in lancs_conta %}
+            {% if l.categoria in ['salario', 'extra', 'bonus'] %}
+                {% set ns_conta.total = ns_conta.total + l.valor %}
+                {% set ns_conta.has = true %}
+            {% endif %}
+        {% endfor %}
+        {% if ns_conta.has %}
+            <div class="metric-container" style="margin-bottom: 0.75rem;">
+                <div style="font-weight: 700; color: #1e3a8a; margin-bottom: 0.35rem;">
+                    Conta: R$ {{ "{:,.2f}".format(ns_conta.total - pix_por_saldo.get(saldo.id, 0)) }}
+                </div>
+            </div>
+            {% for l in lancs_conta %}
+            {% if l.categoria in ['salario', 'extra', 'bonus'] %}
+            <div class="metric-container" style="margin-bottom: 0.75rem;">
+                <div style="font-weight: 700; color: #1e3a8a; margin-bottom: 0.35rem;">
+                    {% if l.categoria == 'salario' %}
+                    Salário R$ {{ "{:,.2f}".format(l.valor) }}
+                    {% else %}
+                    {{ l.categoria|capitalize }}{% if l.descricao %}: {{ l.descricao }}{% endif %}: R$ {{ "{:,.2f}".format(l.valor) }}
+                    {% endif %}
+                </div>
+                <div style="font-size: 0.92rem; color: #6b7280; margin-bottom: 0.25rem;">
+                    Data: {{ l.data_recebimento or l.created_at[:10] }}
+                </div>
+                <div style="font-size: 0.92rem; color: #6b7280;">
+                    Status:
+                    {% if l.tipo_origem == 'agendado' %}
+                        <span style="color:#ff6a00;font-weight:600;">Agendado</span>
+                    {% else %}
+                        <span style="color:#16a34a;font-weight:600;">Recebido</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        {% else %}
+            <p>Nenhum lançamento de conta para {{ saldo.nome }}.</p>
+        {% endif %}
+
+        <h4>Receitas por benefício</h4>
+        {% set resumo_beneficios = resumo_beneficios_por_saldo.get(saldo.id, []) %}
+        {% if resumo_beneficios %}
+            {% for b in resumo_beneficios %}
+            <div class="metric-container" style="margin-bottom: 0.75rem;">
+                <div style="font-weight: 700; color: #1e3a8a; margin-bottom: 0.35rem;">
+                    {{ b.nome }}: R$ {{ "{:,.2f}".format(b.total) }}
+                </div>
+                <div style="font-size: 0.92rem; color: #6b7280; margin-bottom: 0.25rem;">
+                    Gastos: R$ {{ "{:,.2f}".format(b.total_gasto) }}
+                </div>
+                {% if b.gastos %}
+                <div class="table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Gasto</th>
+                                <th>Valor</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for g in b.gastos %}
+                            <tr>
+                                <td>{{ g.descricao }}</td>
+                                <td>R$ {{ "{:,.2f}".format(g.valor) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div style="font-size: 0.92rem; color: #6b7280;">Sem gastos vinculados.</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <p>Nenhum benefício lançado para {{ saldo.nome }}.</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+function toggleExtraFields() {
+    const select = document.getElementById('extra_select');
+    const novo = document.getElementById('descricao_nova');
+    const existente = document.getElementById('descricao_existente');
+    const categoria = document.getElementById('categoria_extra');
+    const dataRecebimento = document.querySelector('input[name="data_recebimento"]');
+    
+    if (select.value === 'novo') {
+        novo.style.display = 'block';
+        existente.style.display = 'none';
+        if (categoria) categoria.value = 'extra';
+        if (dataRecebimento) dataRecebimento.value = '';
+    } else {
+        novo.style.display = 'none';
+        existente.style.display = 'block';
+        document.getElementById('descricao_existente_input').value = select.value;
+        const selected = select.options[select.selectedIndex];
+        if (categoria && selected && selected.dataset.categoria) {
+            categoria.value = selected.dataset.categoria;
+        }
+        if (dataRecebimento && selected) {
+            dataRecebimento.value = selected.dataset.dataRecebimento || '';
+        }
+    }
+    toggleValorExtraLabel();
+}
+
+function toggleValorExtraLabel() {
+    const categoria = document.getElementById('categoria_extra');
+    const label = document.getElementById('label_valor_extra');
+    if (!categoria || !label) return;
+    if (categoria.value === 'beneficio') {
+        label.textContent = 'Valor padrão (R$)';
+    } else {
+        label.textContent = 'Valor adicional (R$)';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    toggleExtraFields();
+    toggleValorExtraLabel();
+});
+</script>
+{% endblock %}
+
+
+
+
+

@@ -1,0 +1,138 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Dashboard - Fechou Mês{% endblock %}
+
+{% block content %}
+<h1 style="text-align: center; color: #2d3748; margin-bottom: 2rem;">Dashboard Financeiro</h1>
+
+<!-- Filtro -->
+<form method="GET" style="margin-bottom: 2rem;">
+    <div class="row form-row">
+        <div class="col-2">
+            <div class="form-group">
+                <label>Mês</label>
+                <select name="mes">
+                    {% set meses = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == mes %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Ano</label>
+                <input type="number" name="ano" value="{{ ano }}" min="2000" max="2100">
+            </div>
+        </div>
+        <div class="col-2 form-action-col">
+            <button type="submit" class="btn btn-primary">Filtrar</button>
+        </div>
+    </div>
+</form>
+
+<!-- Seção RECEITAS -->
+<div class="section-title">RECEITAS</div>
+{% for r in resumo_receitas_padrao %}
+<div class="receita-group-title">{{ r.nome }}</div>
+<div class="receita-row">
+    <div>
+        <div class="metric-container metric-receita receita-card">
+            <div class="card-title">Saldo conta - {{ r.nome }}</div>
+            <div class="card-value" style="color: #16a34a;">R$ {{ "{:,.2f}".format(r.saldo_conta - pix_por_nome_padrao.get(r.nome, 0)) }}</div>
+        </div>
+    </div>
+    {% for b in saldos_beneficios_por_pessoa.get(r.nome, []) %}
+    <div>
+        <div class="metric-container metric-receita receita-card">
+            <div class="card-title">Saldo benefício - {{ b.beneficio }}</div>
+            <div class="card-value" style="color: #16a34a;">R$ {{ "{:,.2f}".format(b.saldo_disponivel) }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+
+<br>
+
+<!-- Seção DESPESAS -->
+<div class="section-title" style="border-bottom-color: #dc2626;">DESPESAS</div>
+<div class="row">
+    <div class="col-4">
+        <div class="metric-container metric-despesa">
+            <div class="card-title">Contas Fixas</div>
+            <div class="card-value" style="color: #dc2626;">R$ {{ "{:,.2f}".format(totais_contas['total']) }}</div>
+            <div style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
+                Pendente: R$ {{ "{:,.2f}".format(totais_contas['total_pendente']) }} | Pago: R$ {{ "{:,.2f}".format(totais_contas['total_pago']) }}
+            </div>
+        </div>
+    </div>
+    <div class="col-4">
+        <div class="metric-container metric-despesa">
+            <div class="card-title">Fatura do Cartão</div>
+            <div class="card-value" style="color: #dc2626;">R$ {{ "{:,.2f}".format(fatura_info['total_geral']) }}</div>
+            <div style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
+                Meu: R$ {{ "{:,.2f}".format(fatura_info['total_meu']) }} | Terceiros: R$ {{ "{:,.2f}".format(fatura_info['total_terceiros']) }}
+            </div>
+        </div>
+    </div>
+    <div class="col-4">
+        <div class="metric-container metric-despesa">
+            <div class="card-title">Gastos Pix/Débito</div>
+            <div class="card-value" style="color: #dc2626;">R$ {{ "{:,.2f}".format(totais_pix['total_geral']) }}</div>
+            <div style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
+                Meu: R$ {{ "{:,.2f}".format(totais_pix['total_meu']) }} | Terceiros: R$ {{ "{:,.2f}".format(totais_pix['total_terceiros']) }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<br>
+
+<!-- Seção VALORES A RECEBER -->
+<div class="section-title" style="border-bottom-color: #4facfe;">VALORES A RECEBER (TERCEIROS)</div>
+<div class="row">
+    <div class="col-4">
+        <div class="metric-container metric-terceiros">
+            <div class="card-title">Total do Mês</div>
+            <div class="card-value" style="color: #4facfe;">R$ {{ "{:,.2f}".format(total_mes_terc) }}</div>
+        </div>
+    </div>
+    <div class="col-4">
+        <div class="metric-container metric-terceiros">
+            <div class="card-title">Total Pago</div>
+            <div class="card-value" style="color: #16a34a;">R$ {{ "{:,.2f}".format(total_pago_terc) }}</div>
+        </div>
+    </div>
+    <div class="col-4">
+        <div class="metric-container metric-terceiros">
+            <div class="card-title">Saldo Pendente</div>
+            <div class="card-value" style="color: #ff6a00;">R$ {{ "{:,.2f}".format(saldo_pend_terc) }}</div>
+        </div>
+    </div>
+</div>
+
+<br>
+
+<!-- Seção RESULTADO FINAL -->
+<div class="section-title">RESULTADO DO MÊS</div>
+<div class="row">
+    <div class="col-6">
+        <div class="metric-container metric-despesa">
+            <div class="card-title">Total de Despesas</div>
+            <div class="card-value" style="color: #dc2626; font-size: 2rem;">R$ {{ "{:,.2f}".format(total_despesas) }}</div>
+        </div>
+    </div>
+    <div class="col-6">
+        <div class="metric-container metric-resultado">
+            <div class="card-title">Saldo Restante</div>
+            <div class="card-value" style="color: {% if saldo_restante >= 0 %}#16a34a{% else %}#dc2626{% endif %}; font-size: 2rem;">R$ {{ "{:,.2f}".format(saldo_restante) }}</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+
+
+
+

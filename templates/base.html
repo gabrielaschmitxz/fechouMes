@@ -1,0 +1,114 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Fechou Mês - Controle Financeiro{% endblock %}</title>
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Fechou Mês</h2>
+                <p>Controle Financeiro</p>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('dashboard') }}" class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
+                <a href="{{ url_for('receitas') }}" class="nav-item {% if request.endpoint == 'receitas' %}active{% endif %}">Receitas</a>
+                <a href="{{ url_for('cartao') }}" class="nav-item {% if request.endpoint == 'cartao' %}active{% endif %}">Cartão</a>
+                <a href="{{ url_for('gastos_pix') }}" class="nav-item {% if request.endpoint == 'gastos_pix' %}active{% endif %}">Gastos Pix</a>
+                <a href="{{ url_for('contas_fixas') }}" class="nav-item {% if request.endpoint == 'contas_fixas' %}active{% endif %}">Contas Fixas</a>
+                <a href="{{ url_for('pessoas') }}" class="nav-item {% if request.endpoint == 'pessoas' %}active{% endif %}">Pessoas</a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="flash-messages">
+                        {% for category, message in messages %}
+                            <div class="flash flash-{{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    <!-- jQuery, Popper.js, Bootstrap JS -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        (function () {
+            function formatMoneyFromDigits(digits) {
+                const numeric = Number(digits || "0") / 100;
+                return new Intl.NumberFormat("pt-BR", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                }).format(numeric);
+            }
+
+            function parseMoneyToDot(value) {
+                if (!value) return "";
+                const cleaned = value.replace(/[^\d,.-]/g, "").trim();
+                if (!cleaned) return "";
+                if (cleaned.indexOf(",") >= 0) {
+                    return cleaned.replace(/\./g, "").replace(",", ".");
+                }
+                return cleaned;
+            }
+
+            function initMoneyInput(input) {
+                input.addEventListener("input", function () {
+                    const digits = input.value.replace(/\D/g, "");
+                    if (!digits) {
+                        input.value = "";
+                        return;
+                    }
+                    input.value = formatMoneyFromDigits(digits);
+                });
+
+                input.addEventListener("blur", function () {
+                    if (!input.value) return;
+                    const digits = input.value.replace(/\D/g, "");
+                    if (!digits) {
+                        input.value = "";
+                        return;
+                    }
+                    input.value = formatMoneyFromDigits(digits);
+                });
+
+                if (input.value && /^\d+(\.\d+)?$/.test(input.value)) {
+                    const numeric = Number(input.value);
+                    if (!Number.isNaN(numeric)) {
+                        input.value = numeric.toLocaleString("pt-BR", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        });
+                    }
+                }
+            }
+
+            document.addEventListener("DOMContentLoaded", function () {
+                document.querySelectorAll("input.money-input").forEach(initMoneyInput);
+
+                document.querySelectorAll("form").forEach(function (form) {
+                    form.addEventListener("submit", function () {
+                        form.querySelectorAll("input.money-input").forEach(function (input) {
+                            input.value = parseMoneyToDot(input.value);
+                        });
+                    });
+                });
+            });
+        })();
+    </script>
+</body>
+</html>
+
