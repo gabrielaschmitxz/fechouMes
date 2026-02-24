@@ -211,7 +211,7 @@ def receitas():
                 categoria = (extra_existente.categoria or categoria).strip().lower()
                 if not data_recebimento and extra_existente.data_recebimento:
                     data_recebimento = str(extra_existente.data_recebimento)
-            
+
             if not descricao:
                 flash('Informe a descriÃ§Ã£o.', 'warning')
                 return redirect(url_for('receitas'))
@@ -263,6 +263,7 @@ def receitas():
                     categoria,
                     data_ref.isoformat() if data_ref else None,
                 )
+
             saldo = receita_service.obter_saldo_por_nome(pessoa_saldo)
             if saldo:
                 if categoria == 'beneficio' and data_ref and data_ref > date.today():

@@ -149,26 +149,10 @@
         <div class="section-title section-title-extra">REGISTRAR RECEITA</div>
         <form method="POST">
             <input type="hidden" name="action" value="extra">
-            <div class="form-group">
-                <label>Receita</label>
-                <select name="extra_select" id="extra_select" onchange="toggleExtraFields()">
-                    <option value="novo">Novo</option>
-                    {% for extra in extras %}
-                        <option
-                            value="{{ extra.descricao }}"
-                            data-categoria="{{ extra.categoria }}"
-                            data-data-recebimento="{{ extra.data_recebimento or '' }}">
-                            {{ extra.descricao }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </div>
+            <input type="hidden" name="extra_select" value="novo">
             <div class="form-group" id="descricao_nova">
                 <label>Descrição da nova receita</label>
                 <input type="text" name="descricao_nova" id="descricao_nova_input">
-            </div>
-            <div class="form-group" id="descricao_existente" style="display: none;">
-                <input type="hidden" name="descricao" id="descricao_existente_input">
             </div>
             <div class="row form-row">
                 <div class="col-2">
@@ -512,26 +496,23 @@
 function toggleExtraFields() {
     const select = document.getElementById('extra_select');
     const novo = document.getElementById('descricao_nova');
-    const existente = document.getElementById('descricao_existente');
     const categoria = document.getElementById('categoria_extra');
     const dataRecebimento = document.querySelector('input[name="data_recebimento"]');
-    
+
+    if (!select) {
+        novo.style.display = 'block';
+        if (categoria) categoria.value = 'extra';
+        if (dataRecebimento) dataRecebimento.value = '';
+        toggleValorExtraLabel();
+        return;
+    }
+
     if (select.value === 'novo') {
         novo.style.display = 'block';
-        existente.style.display = 'none';
         if (categoria) categoria.value = 'extra';
         if (dataRecebimento) dataRecebimento.value = '';
     } else {
         novo.style.display = 'none';
-        existente.style.display = 'block';
-        document.getElementById('descricao_existente_input').value = select.value;
-        const selected = select.options[select.selectedIndex];
-        if (categoria && selected && selected.dataset.categoria) {
-            categoria.value = selected.dataset.categoria;
-        }
-        if (dataRecebimento && selected) {
-            dataRecebimento.value = selected.dataset.dataRecebimento || '';
-        }
     }
     toggleValorExtraLabel();
 }
