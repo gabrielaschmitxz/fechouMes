@@ -214,7 +214,6 @@
 
         <section class="receita-section receita-section-listas receita-section-agendadas">
         <h4 class="subsection-title">Receitas Agendadas</h4>
-        {% if extras %}
         <div class="table table-orange">
             <table>
                 <thead>
@@ -229,78 +228,68 @@
                 </thead>
                 <tbody>
                     {% set ns = namespace(has_agendada=false) %}
-                    {% for extra in extras %}
-                    {% if extra.data_recebimento and extra.data_recebimento > hoje_iso %}
+                    {% for x in lancamentos_extras_tabela %}
+                    {% if x.status == 'Agendado' and x.categoria != 'salario' and x.data_ref and x.data_ref > hoje_iso %}
                     {% set ns.has_agendada = true %}
                     <tr>
-                        <td>{{ extra.descricao }}</td>
-                        <td>{{ extra.categoria|capitalize }}</td>
-                        <td>{{ extra.data_recebimento or '-' }}</td>
+                        <td>{{ x.descricao or x.extra_nome }}</td>
+                        <td>{{ x.categoria|capitalize }}</td>
+                        <td>{{ x.data_ref or '-' }}</td>
                         <td>
                             <span style="color:#ff6a00;font-weight:600;">Agendado</span>
                         </td>
-                        <td>
-                            {% if extra.valor_padrao is not none %}
-                                R$ {{ "{:,.2f}".format(extra.valor_padrao) }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
+                        <td>R$ {{ "{:,.2f}".format(x.valor) }}</td>
                         <td>
                             <button
                                 type="button"
                                 class="btn btn-warning btn-sm"
                                 data-toggle="collapse"
-                                data-target="#editar-extra-{{ extra.id }}"
+                                data-target="#editar-agendada-{{ x.lancamento_id }}"
                                 aria-expanded="false"
-                                aria-controls="editar-extra-{{ extra.id }}">
+                                aria-controls="editar-agendada-{{ x.lancamento_id }}">
                                 Editar
                             </button>
                             <form method="POST" style="display: inline;">
-                                <input type="hidden" name="action" value="excluir_receita_extra">
-                                <input type="hidden" name="extra_id" value="{{ extra.id }}">
+                                <input type="hidden" name="action" value="excluir_lancamento">
+                                <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
                                 <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
                             </form>
                         </td>
                     </tr>
-                    <tr class="collapse" id="editar-extra-{{ extra.id }}">
+                    <tr class="collapse" id="editar-agendada-{{ x.lancamento_id }}">
                         <td colspan="6">
                             <form method="POST">
-                                <input type="hidden" name="action" value="editar_receita_extra">
-                                <input type="hidden" name="extra_id" value="{{ extra.id }}">
+                                <input type="hidden" name="action" value="editar_lancamento">
+                                <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
                                 <div class="row form-row">
                                     <div class="col-2">
                                         <div class="form-group">
                                             <label>Categoria</label>
-                                            <select name="categoria_extra_edit" required>
-                                                <option value="extra" {% if extra.categoria == 'extra' %}selected{% endif %}>Extra</option>
-                                                <option value="beneficio" {% if extra.categoria == 'beneficio' %}selected{% endif %}>Benefício</option>
-                                                <option value="bonus" {% if extra.categoria == 'bonus' %}selected{% endif %}>Bônus</option>
+                                            <select name="categoria" required>
+                                                <option value="salario" {% if x.categoria == 'salario' %}selected{% endif %}>Salário</option>
+                                                <option value="beneficio" {% if x.categoria == 'beneficio' %}selected{% endif %}>Benefício</option>
+                                                <option value="bonus" {% if x.categoria == 'bonus' %}selected{% endif %}>Bônus</option>
+                                                <option value="extra" {% if x.categoria == 'extra' %}selected{% endif %}>Extra</option>
                                             </select>
                                         </div>
                                     </div>
                                     <div class="col-4">
                                         <div class="form-group">
                                             <label>Nome</label>
-                                            <input type="text" name="descricao" value="{{ extra.descricao }}" required>
+                                            <input type="text" name="descricao" value="{{ x.descricao }}" required>
                                         </div>
                                     </div>
                                     <div class="col-2">
                                         <div class="form-group">
-                                            <label>Data recebimento</label>
-                                            <input type="date" name="data_recebimento_edit" value="{{ extra.data_recebimento or '' }}">
-                                        </div>
-                                    </div>
-                                    <div class="col-2">
-                                        <div class="form-group">
-                                            <label>Valor padrão (R$)</label>
+                                            <label>Valor (R$)</label>
                                             <input
                                                 type="text"
                                                 class="money-input"
                                                 inputmode="numeric"
                                                 autocomplete="off"
-                                                name="valor_padrao"
-                                                value="{{ '%.2f'|format(extra.valor_padrao) if extra.valor_padrao is not none else '' }}">
+                                                name="valor"
+                                                value="{{ '%.2f'|format(x.valor) }}"
+                                                required>
                                         </div>
                                     </div>
                                     <div class="col-2 form-action-col">
@@ -320,9 +309,6 @@
                 </tbody>
             </table>
         </div>
-        {% else %}
-        <p>Nenhuma receita agendada.</p>
-        {% endif %}
         </section>
 
         <div class="receita-section-divider"></div>
