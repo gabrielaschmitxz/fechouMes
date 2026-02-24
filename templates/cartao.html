@@ -5,19 +5,20 @@
 {% block content %}
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Cartão de Crédito</h1>
 
-<ul class="nav nav-tabs" role="tablist" style="margin-bottom: 1rem;">
+<ul class="nav nav-tabs cartao-tabs" role="tablist">
     <li class="nav-item">
-        <a class="nav-link active" data-toggle="tab" href="#tab-cartao-principal" role="tab">Cartão</a>
+        <a class="nav-link active" data-toggle="tab" href="#tab-cartao-principal" role="tab">Cartão de Crédito</a>
     </li>
     <li class="nav-item">
         <a class="nav-link" data-toggle="tab" href="#tab-cartao-lancamentos" role="tab">Todos os lançamentos</a>
     </li>
 </ul>
 
-<div class="tab-content">
+<div class="tab-content cartao-tab-content">
 <div class="tab-pane fade show active" id="tab-cartao-principal" role="tabpanel">
 
 <!-- Configuração -->
+<section class="cartao-section cartao-section-config">
 <div class="section-title">Configuração do Cartão</div>
 <form method="POST">
     <input type="hidden" name="action" value="config">
@@ -45,10 +46,12 @@
         </div>
     </div>
 </form>
+</section>
 
-<br>
+<div class="cartao-section-divider"></div>
 
 <!-- Fatura Atual -->
+<section class="cartao-section cartao-section-fatura">
 <div class="section-title">Fatura Atual</div>
 <div style="margin: -0.35rem 0 0.55rem; font-size: 0.98rem; font-weight: 600; color: #2d3748;">
     Status: <span style="color: {% if cfg.fatura_paga %}#16a34a{% else %}#dc2626{% endif %};">
@@ -86,10 +89,12 @@
         <button type="submit" class="btn btn-secondary btn-sm">Reabrir fatura (desfazer)</button>
     </form>
 </div>
+</section>
 
-<br>
+<div class="cartao-section-divider"></div>
 
 <!-- Nova Compra -->
+<section class="cartao-section cartao-section-compra">
 <div class="section-title">Nova Compra no Cartão</div>
 <form method="POST">
     <input type="hidden" name="action" value="compra">
@@ -148,13 +153,15 @@
     </div>
     <button type="submit" class="btn btn-primary">Registrar compra</button>
 </form>
+</section>
 
 </div>
 
 <div class="tab-pane fade" id="tab-cartao-lancamentos" role="tabpanel">
+    <section class="cartao-section cartao-section-lancamentos">
     <div class="section-title">Todos os lançamentos</div>
     {% if lancamentos_todos %}
-    <div class="table">
+    <div class="table table-blue">
         <table>
             <thead>
                 <tr>
@@ -263,6 +270,7 @@
     {% else %}
     <p>Nenhum lançamento encontrado.</p>
     {% endif %}
+    </section>
 </div>
 </div>
 

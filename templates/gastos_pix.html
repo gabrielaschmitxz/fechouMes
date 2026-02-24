@@ -1,12 +1,11 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 
-{% block title %}Gastos Pix / Débito - Fechou Mês{% endblock %}
+{% block title %}Gastos Pix / Débito / Benefício - Fechou Mês{% endblock %}
 
 {% block content %}
-<h1 style="color: #2d3748; margin-bottom: 1.5rem;">Gastos Pix / Débito</h1>
+<h1 style="color: #2d3748; margin-bottom: 1.5rem;">Gastos Pix / Débito / Benefício</h1>
 
-<!-- Filtro -->
-<form method="GET" style="margin-bottom: 2rem;">
+<form method="GET" class="contas-filter">
     <div class="row form-row">
         <div class="col-2">
             <div class="form-group">
@@ -31,154 +30,162 @@
     </div>
 </form>
 
-<!-- Novo Gasto -->
-<h3>Novo gasto</h3>
-<form method="POST">
-    <input type="hidden" name="action" value="novo_gasto">
-    <div class="row form-row">
-        <div class="col-2">
-            <div class="form-group">
-                <label>Descrição</label>
-                <input type="text" name="descricao" required>
-            </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Valor (R$)</label>
-                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" step="10" min="0" required>
-            </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Pessoa</label>
-                <select name="pessoa_id" required>
-                    {% for p in pessoas %}
-                        <option value="{{ p.id }}">{{ p.nome }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Abater benefício</label>
-                <select name="receita_extra_id">
-                    <option value="">(Não abater benefício)</option>
-                    {% for b in beneficios %}
-                        <option value="{{ b.id }}">{{ b.descricao }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Saldo abatimento</label>
-                <select name="saldo_beneficio_nome">
-                    <option value="">(Selecione se usar benefício)</option>
-                    {% for s in saldos_padrao %}
-                        <option value="{{ s.nome }}">{{ s.nome }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
-        <div class="col-2 form-action-col">
-            <button type="submit" class="btn btn-primary">Registrar gasto</button>
-        </div>
-    </div>
-</form>
+<div class="pix-content">
 
-<hr>
+    <!-- Novo Gasto -->
+    <section class="pix-section pix-section-new">
+        <div class="section-title">Novo gasto</div>
+        <form method="POST">
+            <input type="hidden" name="action" value="novo_gasto">
+            <div class="row form-row">
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Descrição</label>
+                        <input type="text" name="descricao" required>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Valor (R$)</label>
+                        <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" step="10" min="0" required>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Pessoa</label>
+                        <select name="pessoa_id" required>
+                            {% for p in pessoas %}
+                                <option value="{{ p.id }}">{{ p.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Abater benefício</label>
+                        <select name="receita_extra_id">
+                            <option value="">(Não abater benefício)</option>
+                            {% for b in beneficios %}
+                                <option value="{{ b.id }}">{{ b.descricao }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Saldo abatimento</label>
+                        <select name="saldo_beneficio_nome">
+                            <option value="">(Selecione se usar benefício)</option>
+                            {% for s in saldos_padrao %}
+                                <option value="{{ s.nome }}">{{ s.nome }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2 form-action-col">
+                    <button type="submit" class="btn btn-primary">Registrar gasto</button>
+                </div>
+            </div>
+        </form>
+    </section>
 
-<!-- Lista de Gastos -->
-<h3>Lista de gastos do mês</h3>
-{% if gastos %}
-<div class="table">
-    <table>
-        <thead>
-            <tr>
-                <th>Descrição</th>
-                <th>Valor</th>
-                <th>Pessoa</th>
-                <th>Benefício</th>
-                <th>Ações</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for g in gastos %}
-            <tr>
-                <td>{{ g.descricao }}</td>
-                <td>R$ {{ "{:,.2f}".format(g.valor) }}</td>
-                <td>{% for p in pessoas %}{% if p.id == g.pessoa_id %}{{ p.nome }}{% endif %}{% endfor %}</td>
-                <td>{% for b in beneficios %}{% if b.id == g.receita_extra_id %}{{ b.descricao }}{% endif %}{% endfor %}</td>
-                <td>
-                    <button
-                        type="button"
-                        class="btn btn-warning btn-sm"
-                        data-toggle="collapse"
-                        data-target="#editar-gasto-{{ g.id }}"
-                        aria-expanded="false"
-                        aria-controls="editar-gasto-{{ g.id }}">
-                        Editar
-                    </button>
-                    <form method="POST" style="display: inline;">
-                        <input type="hidden" name="action" value="excluir_gasto">
-                        <input type="hidden" name="gasto_id" value="{{ g.id }}">
-                        <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
-                    </form>
-                </td>
-            </tr>
-            <tr class="collapse" id="editar-gasto-{{ g.id }}">
-                <td colspan="5">
-                    <form method="POST">
-                        <input type="hidden" name="action" value="editar_gasto">
-                        <input type="hidden" name="gasto_id" value="{{ g.id }}">
-                        <div class="row form-row">
-                            <div class="col-4">
-                                <div class="form-group">
-                                    <label>Descrição</label>
-                                    <input type="text" name="descricao" value="{{ g.descricao }}" required>
+    <div class="pix-section-divider"></div>
+
+    <!-- Lista de Gastos -->
+    <section class="pix-section pix-section-list">
+        <div class="section-title">Lista de gastos do mês</div>
+        {% if gastos %}
+        <div class="table table-blue">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Descrição</th>
+                        <th>Valor</th>
+                        <th>Pessoa</th>
+                        <th>Benefício</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for g in gastos %}
+                    <tr>
+                        <td>{{ g.descricao }}</td>
+                        <td>R$ {{ "{:,.2f}".format(g.valor) }}</td>
+                        <td>{% for p in pessoas %}{% if p.id == g.pessoa_id %}{{ p.nome }}{% endif %}{% endfor %}</td>
+                        <td>{% for b in beneficios %}{% if b.id == g.receita_extra_id %}{{ b.descricao }}{% endif %}{% endfor %}</td>
+                        <td>
+                            <button
+                                type="button"
+                                class="btn btn-warning btn-sm"
+                                data-toggle="collapse"
+                                data-target="#editar-gasto-{{ g.id }}"
+                                aria-expanded="false"
+                                aria-controls="editar-gasto-{{ g.id }}">
+                                Editar
+                            </button>
+                            <form method="POST" style="display: inline;">
+                                <input type="hidden" name="action" value="excluir_gasto">
+                                <input type="hidden" name="gasto_id" value="{{ g.id }}">
+                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="editar-gasto-{{ g.id }}">
+                        <td colspan="5">
+                            <form method="POST">
+                                <input type="hidden" name="action" value="editar_gasto">
+                                <input type="hidden" name="gasto_id" value="{{ g.id }}">
+                                <div class="row form-row">
+                                    <div class="col-4">
+                                        <div class="form-group">
+                                            <label>Descrição</label>
+                                            <input type="text" name="descricao" value="{{ g.descricao }}" required>
+                                        </div>
+                                    </div>
+                                    <div class="col-2">
+                                        <div class="form-group">
+                                            <label>Valor (R$)</label>
+                                            <input
+                                                type="text"
+                                                class="money-input"
+                                                inputmode="numeric"
+                                                autocomplete="off"
+                                                name="valor"
+                                                value="{{ '%.2f'|format(g.valor) }}"
+                                                required>
+                                        </div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="form-group">
+                                            <label>Pessoa</label>
+                                            <select name="pessoa_id" required>
+                                                {% for p in pessoas %}
+                                                    <option value="{{ p.id }}" {% if p.id == g.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-2 form-action-col">
+                                        <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                    </div>
                                 </div>
-                            </div>
-                            <div class="col-2">
-                                <div class="form-group">
-                                    <label>Valor (R$)</label>
-                                    <input
-                                        type="text"
-                                        class="money-input"
-                                        inputmode="numeric"
-                                        autocomplete="off"
-                                        name="valor"
-                                        value="{{ '%.2f'|format(g.valor) }}"
-                                        required>
-                                </div>
-                            </div>
-                            <div class="col-3">
-                                <div class="form-group">
-                                    <label>Pessoa</label>
-                                    <select name="pessoa_id" required>
-                                        {% for p in pessoas %}
-                                            <option value="{{ p.id }}" {% if p.id == g.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-2 form-action-col">
-                                <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
-                            </div>
-                        </div>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-top: 1rem;">
+            <strong>Total geral: R$ {{ "{:,.2f}".format(totais['total_geral']) }}</strong><br>
+            <small>Meu: R$ {{ "{:,.2f}".format(totais['total_meu']) }} | Terceiros: R$ {{ "{:,.2f}".format(totais['total_terceiros']) }}</small>
+        </div>
+        {% else %}
+        <p>Nenhum gasto registrado para este mês.</p>
+        {% endif %}
+    </section>
 </div>
-<div style="margin-top: 1rem;">
-    <strong>Total geral: R$ {{ "{:,.2f}".format(totais['total_geral']) }}</strong><br>
-    <small>Meu: R$ {{ "{:,.2f}".format(totais['total_meu']) }} | Terceiros: R$ {{ "{:,.2f}".format(totais['total_terceiros']) }}</small>
-</div>
-{% else %}
-<p>Nenhum gasto registrado para este mês.</p>
-{% endif %}
 {% endblock %}
+
 
 

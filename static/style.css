@@ -207,6 +207,436 @@ body {
     border-bottom: 3px solid var(--primary-blue);
 }
 
+/* Receitas - abas e separacao de secoes */
+.receitas-tabs {
+    gap: 0.5rem;
+    border-bottom: 0;
+    margin-bottom: 1rem;
+}
+
+.receitas-tabs .nav-item {
+    margin-bottom: 0;
+}
+
+.receitas-tabs .nav-link {
+    border: 1px solid #cfd8ea;
+    border-radius: 10px 10px 0 0;
+    background: #eef2ff;
+    color: #1f2a44;
+    font-weight: 600;
+    padding: 0.6rem 1rem;
+}
+
+.receitas-tabs .nav-link:hover {
+    border-color: #b8c5e0;
+    background: #e2e8ff;
+}
+
+.receitas-tabs .nav-link.active {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    border-color: #1e3a8a;
+    color: #fff;
+}
+
+.receitas-tab-content {
+    background: #fff;
+    border: 1px solid #dbe3f2;
+    border-top: 3px solid #1e3a8a;
+    border-radius: 0 10px 10px 10px;
+    padding: 1rem 1rem 1.25rem;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.receita-section {
+    border: 1px solid #e2e8f0;
+    border-left: 5px solid #1e40af;
+    border-radius: 10px;
+    background: #f8fbff;
+    padding: 1rem;
+}
+
+.receita-section-salario {
+    border-left-color: #2563eb;
+}
+
+.receita-section-extra {
+    border-left-color: #3b82f6;
+    background: #eff6ff;
+}
+
+.receita-section-divider {
+    height: 1rem;
+}
+
+.receita-section-divider-strong {
+    height: 1.4rem;
+}
+
+.receita-section .section-title {
+    margin-top: 0;
+    border-bottom-width: 2px;
+    font-size: 1.2rem;
+}
+
+.receita-section .section-title-salario {
+    border-bottom-color: #1e3a8a;
+    color: #1e3a8a;
+}
+
+.receita-section .section-title-extra {
+    border-bottom-color: #93c5fd;
+    color: #3b82f6;
+}
+
+.receita-section-listas {
+    border-left-color: #94a3b8;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.receita-section-agendadas {
+    border-left-color: #f97316;
+}
+
+.receita-section-recebidas {
+    border-left-color: #22c55e;
+}
+
+.subsection-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 0 0 0.6rem;
+}
+
+.table-blue {
+    border: 1px solid #bfdbfe;
+}
+
+.table-blue th {
+    background-color: #e0f2fe;
+}
+
+.table-orange {
+    border: 1px solid #fdba74;
+}
+
+.table-orange th {
+    background-color: #ffedd5;
+}
+
+.table-green {
+    border: 1px solid #86efac;
+}
+
+.table-green th {
+    background-color: #dcfce7;
+}
+
+/* Cartao - mesmo visual de abas e blocos */
+.cartao-tabs {
+    gap: 0.5rem;
+    border-bottom: 0;
+    margin-bottom: 1rem;
+}
+
+.cartao-tabs .nav-item {
+    margin-bottom: 0;
+}
+
+.cartao-tabs .nav-link {
+    border: 1px solid #cfd8ea;
+    border-radius: 10px 10px 0 0;
+    background: #eef2ff;
+    color: #1f2a44;
+    font-weight: 600;
+    padding: 0.6rem 1rem;
+}
+
+.cartao-tabs .nav-link:hover {
+    border-color: #b8c5e0;
+    background: #e2e8ff;
+}
+
+.cartao-tabs .nav-link.active {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    border-color: #1e3a8a;
+    color: #fff;
+}
+
+.cartao-tab-content {
+    background: #fff;
+    border: 1px solid #dbe3f2;
+    border-top: 3px solid #1e3a8a;
+    border-radius: 0 10px 10px 10px;
+    padding: 1rem 1rem 1.25rem;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.cartao-section {
+    border: 1px solid #e2e8f0;
+    border-left: 5px solid #1e40af;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 1rem;
+}
+
+.cartao-section .section-title {
+    margin-top: 0;
+    border-bottom-width: 2px;
+    font-size: 1.2rem;
+}
+
+.cartao-section-config {
+    border-left-color: #1e3a8a;
+    background: #f8fbff;
+}
+
+.cartao-section-config .section-title {
+    border-bottom-color: #1e3a8a;
+    color: #1e3a8a;
+}
+
+.cartao-section-fatura {
+    border-left-color: #f97316;
+    background: #fff7ed;
+}
+
+.cartao-section-fatura .section-title {
+    border-bottom-color: #fb923c;
+    color: #9a3412;
+}
+
+.cartao-section-compra {
+    border-left-color: #60a5fa;
+    background: #eff6ff;
+}
+
+.cartao-section-compra .section-title {
+    border-bottom-color: #93c5fd;
+    color: #2563eb;
+}
+
+.cartao-section-lancamentos {
+    border-left-color: #1e40af;
+    background: #ffffff;
+}
+
+.cartao-section-lancamentos .section-title {
+    border-bottom-color: #60a5fa;
+    color: #1e3a8a;
+}
+
+.cartao-section-divider {
+    height: 1rem;
+}
+
+/* Gastos Pix / Debito / Beneficio - visual novo */
+.pix-content {
+    background: #fff;
+    border: 1px solid #dbe3f2;
+    border-top: 3px solid #1e3a8a;
+    border-radius: 10px;
+    padding: 1rem 1rem 1.25rem;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.pix-section {
+    border: 1px solid #e2e8f0;
+    border-left: 5px solid #1e40af;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 1rem;
+}
+
+.pix-section .section-title {
+    margin-top: 0;
+    border-bottom-width: 2px;
+    font-size: 1.2rem;
+}
+
+.pix-section-filter {
+    border-left-color: #1e3a8a;
+    background: #f8fbff;
+}
+
+.pix-section-filter .section-title {
+    border-bottom-color: #1e3a8a;
+    color: #1e3a8a;
+}
+
+.pix-section-new {
+    border-left-color: #60a5fa;
+    background: #eff6ff;
+}
+
+.pix-section-new .section-title {
+    border-bottom-color: #93c5fd;
+    color: #2563eb;
+}
+
+.pix-section-list {
+    border-left-color: #1e40af;
+    background: #ffffff;
+}
+
+.pix-section-list .section-title {
+    border-bottom-color: #60a5fa;
+    color: #1e3a8a;
+}
+
+.pix-section-divider {
+    height: 1rem;
+}
+
+/* Contas Fixas - visual novo (filtro livre) */
+.contas-filter {
+    margin-bottom: 1.2rem;
+}
+
+.contas-content {
+    background: #fff;
+    border: 1px solid #dbe3f2;
+    border-top: 3px solid #1e3a8a;
+    border-radius: 10px;
+    padding: 1rem 1rem 1.25rem;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.contas-section {
+    border: 1px solid #e2e8f0;
+    border-left: 5px solid #1e40af;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 1rem;
+}
+
+.contas-section .section-title {
+    margin-top: 0;
+    border-bottom-width: 2px;
+    font-size: 1.2rem;
+}
+
+.contas-section-new {
+    border-left-color: #60a5fa;
+    background: #eff6ff;
+}
+
+.contas-section-new .section-title {
+    border-bottom-color: #93c5fd;
+    color: #2563eb;
+}
+
+.contas-section-list {
+    border-left-color: #1e40af;
+    background: #ffffff;
+}
+
+.contas-section-list .section-title {
+    border-bottom-color: #60a5fa;
+    color: #1e3a8a;
+}
+
+.contas-section-divider {
+    height: 1rem;
+}
+
+/* Pessoas - visual novo */
+.pessoas-tabs {
+    gap: 0.5rem;
+    border-bottom: 0;
+    margin-bottom: 1rem;
+}
+
+.pessoas-tabs .nav-item {
+    margin-bottom: 0;
+}
+
+.pessoas-tabs .nav-link {
+    border: 1px solid #cfd8ea;
+    border-radius: 10px 10px 0 0;
+    background: #eef2ff;
+    color: #1f2a44;
+    font-weight: 600;
+    padding: 0.6rem 1rem;
+}
+
+.pessoas-tabs .nav-link:hover {
+    border-color: #b8c5e0;
+    background: #e2e8ff;
+}
+
+.pessoas-tabs .nav-link.active {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    border-color: #1e3a8a;
+    color: #fff;
+}
+
+.pessoas-tab-content {
+    background: #fff;
+    border: 1px solid #dbe3f2;
+    border-top: 3px solid #1e3a8a;
+    border-radius: 0 10px 10px 10px;
+    padding: 1rem 1rem 1.25rem;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.pessoa-section {
+    border: 1px solid #e2e8f0;
+    border-left: 5px solid #1e40af;
+    border-radius: 10px;
+    background: #ffffff;
+    padding: 1rem;
+}
+
+.pessoa-section .section-title {
+    margin-top: 0;
+    border-bottom-width: 2px;
+    font-size: 1.2rem;
+}
+
+.pessoa-section-new {
+    border-left-color: #60a5fa;
+    background: #eff6ff;
+}
+
+.pessoa-section-new .section-title {
+    border-bottom-color: #93c5fd;
+    color: #2563eb;
+}
+
+.pessoa-section-list {
+    border-left-color: #1e40af;
+    background: #ffffff;
+}
+
+.pessoa-section-list .section-title {
+    border-bottom-color: #60a5fa;
+    color: #1e3a8a;
+}
+
+.pessoa-section-receber {
+    border-left-color: #22c55e;
+    background: #f0fdf4;
+}
+
+.pessoa-section-receber .section-title {
+    border-bottom-color: #86efac;
+    color: #166534;
+}
+
+.pessoa-section-divider {
+    height: 1rem;
+}
+
+.pessoa-resumo-mes {
+    background: #fff;
+    border: 1px solid #dbe3f2;
+    border-left: 5px solid #1e40af;
+    border-radius: 10px;
+    padding: 0.8rem 1rem;
+}
+
 /* Forms */
 .form-group {
     margin-bottom: 1.5rem;
@@ -435,5 +865,32 @@ body {
     }
     .cartao-actions .btn {
         width: 100%;
+    }
+    .receitas-tabs .nav-link {
+        border-radius: 10px;
+    }
+    .receitas-tab-content {
+        border-radius: 10px;
+        padding: 0.9rem;
+    }
+    .cartao-tabs .nav-link {
+        border-radius: 10px;
+    }
+    .cartao-tab-content {
+        border-radius: 10px;
+        padding: 0.9rem;
+    }
+    .pix-content {
+        padding: 0.9rem;
+    }
+    .contas-content {
+        padding: 0.9rem;
+    }
+    .pessoas-tabs .nav-link {
+        border-radius: 10px;
+    }
+    .pessoas-tab-content {
+        border-radius: 10px;
+        padding: 0.9rem;
     }
 }

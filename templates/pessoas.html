@@ -6,7 +6,7 @@
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Pessoas / Terceiros</h1>
 
 <!-- Filtro -->
-<form method="GET" style="margin-bottom: 2rem;">
+<form method="GET" class="contas-filter">
     <div class="row form-row">
         <div class="col-2">
             <div class="form-group">
@@ -32,7 +32,7 @@
 </form>
 
 <!-- Abas Pessoas -->
-<ul class="nav nav-tabs" role="tablist" style="margin-bottom: 1rem;">
+<ul class="nav nav-tabs pessoas-tabs" role="tablist">
     <li class="nav-item">
         <a class="nav-link active" data-toggle="tab" href="#tab-cadastro-pessoa" role="tab">Cadastro</a>
     </li>
@@ -45,9 +45,10 @@
     {% endfor %}
 </ul>
 
-<div class="tab-content">
+<div class="tab-content pessoas-tab-content">
     <div class="tab-pane fade show active" id="tab-cadastro-pessoa" role="tabpanel">
-        <h3>Nova pessoa</h3>
+        <section class="pessoa-section pessoa-section-new">
+        <div class="section-title">Nova pessoa</div>
         <form method="POST" class="compact-person-form">
             <input type="hidden" name="action" value="nova_pessoa">
             <div class="row form-row">
@@ -65,12 +66,14 @@
                 </div>
             </div>
         </form>
+        </section>
 
-        <hr>
+        <div class="pessoa-section-divider"></div>
 
-        <h3>Pessoas cadastradas</h3>
+        <section class="pessoa-section pessoa-section-list">
+        <div class="section-title">Pessoas cadastradas</div>
         {% if resumos %}
-        <div class="table">
+        <div class="table table-blue">
             <table>
                 <thead>
                     <tr>
@@ -144,13 +147,14 @@
         {% else %}
         <p>Nenhuma pessoa cadastrada.</p>
         {% endif %}
+        </section>
     </div>
 
     {% for r in resumos %}
     {% if not r.pessoa.padrao %}
     <div class="tab-pane fade" id="tab-pessoa-{{ r.pessoa.id }}" role="tabpanel">
-        <div style="margin-top: 0.5rem;">
-            <h4>Receber pagamento</h4>
+        <section class="pessoa-section pessoa-section-receber" style="margin-top: 0.5rem;">
+            <div class="section-title">Receber pagamento</div>
             {% set contas = contas_status_por_pessoa.get(r.pessoa.id, []) %}
             {% if contas %}
             <form method="POST">
@@ -164,7 +168,7 @@
                     </label>
                 </div>
 
-                <div class="table">
+                <div class="table table-green">
                     <table>
                         <thead>
                             <tr>
@@ -208,13 +212,13 @@
             {% else %}
             <p>Nenhuma conta para esta pessoa no mês selecionado.</p>
             {% endif %}
-        </div>
+        </section>
     </div>
     {% endif %}
     {% endfor %}
 </div>
 
-<div style="margin-top: 1rem;">
+<div class="pessoa-resumo-mes" style="margin-top: 1rem;">
     <strong>Total geral do mês: R$ {{ "{:,.2f}".format(total_mes_geral) }}</strong><br>
     <small>Total pago: R$ {{ "{:,.2f}".format(total_pago_geral) }} | Saldo pendente: R$ {{ "{:,.2f}".format(saldo_pend_geral) }}</small>
 </div>

@@ -6,7 +6,7 @@
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Contas Fixas</h1>
 
 <!-- Filtro -->
-<form method="GET" style="margin-bottom: 2rem;">
+<form method="GET" class="contas-filter">
     <div class="row form-row">
         <div class="col-2">
             <div class="form-group">
@@ -31,62 +31,68 @@
     </div>
 </form>
 
-<!-- Nova conta -->
-<h3>Nova conta fixa</h3>
-<form method="POST" style="margin-bottom: 1.5rem;">
-    <input type="hidden" name="action" value="nova_conta">
-    <div class="row form-row">
-        <div class="col-2">
-            <div class="form-group">
-                <label>Nome</label>
-                <input type="text" name="nome" required>
+<div class="contas-content">
+    <!-- Nova conta -->
+    <section class="contas-section contas-section-new">
+        <div class="section-title">Nova conta fixa</div>
+        <form method="POST">
+            <input type="hidden" name="action" value="nova_conta">
+            <div class="row form-row">
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Nome</label>
+                        <input type="text" name="nome" required>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Categoria</label>
+                        <select name="categoria">
+                            <option value="">(Selecione)</option>
+                            <option value="Estudos">Estudos</option>
+                            <option value="Energia">Energia</option>
+                            <option value="Gás">Gás</option>
+                            <option value="Telefone">Telefone</option>
+                            <option value="Internet">Internet</option>
+                            <option value="Aluguel">Aluguel</option>
+                            <option value="Lojas">Lojas</option>
+                            <option value="Lazer">Lazer</option>
+                            <option value="Outro">Outro</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Valor (R$)</label>
+                        <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" placeholder="Opcional">
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Vencimento (opcional)</label>
+                        <input type="date" name="vencimento_data">
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Data fim (opcional)</label>
+                        <input type="date" name="data_fim">
+                    </div>
+                </div>
+                <div class="col-2 form-action-col">
+                    <button type="submit" class="btn btn-primary">Cadastrar conta</button>
+                </div>
             </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Categoria</label>
-                <select name="categoria">
-                    <option value="">(Selecione)</option>
-                    <option value="Estudos">Estudos</option>
-                    <option value="Energia">Energia</option>
-                    <option value="Gás">Gás</option>
-                    <option value="Telefone">Telefone</option>
-                    <option value="Internet">Internet</option>
-                    <option value="Aluguel">Aluguel</option>
-                    <option value="Lojas">Lojas</option>
-                    <option value="Lazer">Lazer</option>
-                    <option value="Outro">Outro</option>
-                </select>
-            </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Valor (R$)</label>
-                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" placeholder="Opcional">
-            </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Vencimento (opcional)</label>
-                <input type="date" name="vencimento_data">
-            </div>
-        </div>
-        <div class="col-2">
-            <div class="form-group">
-                <label>Data fim (opcional)</label>
-                <input type="date" name="data_fim">
-            </div>
-        </div>
-        <div class="col-2 form-action-col">
-            <button type="submit" class="btn btn-primary">Cadastrar conta</button>
-        </div>
-    </div>
-</form>
+        </form>
+    </section>
 
-<!-- Contas do Mês -->
-<h3>Contas do mês</h3>
+    <div class="contas-section-divider"></div>
+
+    <!-- Contas do Mês -->
+    <section class="contas-section contas-section-list">
+    <div class="section-title">Contas do mês</div>
 {% if contas %}
-<div class="table">
+<div class="table table-blue">
     <table>
         <thead>
             <tr>
@@ -199,6 +205,8 @@
 {% else %}
 <p>Nenhuma conta cadastrada para este mês.</p>
 {% endif %}
+    </section>
+</div>
 {% endblock %}
 
 

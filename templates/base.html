@@ -19,8 +19,8 @@
             <nav class="sidebar-nav">
                 <a href="{{ url_for('dashboard') }}" class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
                 <a href="{{ url_for('receitas') }}" class="nav-item {% if request.endpoint == 'receitas' %}active{% endif %}">Receitas</a>
-                <a href="{{ url_for('cartao') }}" class="nav-item {% if request.endpoint == 'cartao' %}active{% endif %}">Cartão</a>
-                <a href="{{ url_for('gastos_pix') }}" class="nav-item {% if request.endpoint == 'gastos_pix' %}active{% endif %}">Gastos Pix</a>
+                <a href="{{ url_for('cartao') }}" class="nav-item {% if request.endpoint == 'cartao' %}active{% endif %}">Cartão de Crédito</a>
+                <a href="{{ url_for('gastos_pix') }}" class="nav-item {% if request.endpoint == 'gastos_pix' %}active{% endif %}">Gastos Pix / Débito / Benefício</a>
                 <a href="{{ url_for('contas_fixas') }}" class="nav-item {% if request.endpoint == 'contas_fixas' %}active{% endif %}">Contas Fixas</a>
                 <a href="{{ url_for('pessoas') }}" class="nav-item {% if request.endpoint == 'pessoas' %}active{% endif %}">Pessoas</a>
             </nav>

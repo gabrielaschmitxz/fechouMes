@@ -5,7 +5,7 @@
 {% block content %}
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Receitas</h1>
 
-<ul class="nav nav-tabs" role="tablist" style="margin-bottom: 1rem;">
+<ul class="nav nav-tabs receitas-tabs" role="tablist">
     <li class="nav-item">
         <a class="nav-link active" data-toggle="tab" href="#tab-receita-cadastro" role="tab">Cadastro</a>
     </li>
@@ -16,7 +16,7 @@
     {% endfor %}
 </ul>
 
-<div class="tab-content">
+<div class="tab-content receitas-tab-content">
     <div class="tab-pane fade show active" id="tab-receita-cadastro" role="tabpanel">
         {% if not saldos_padrao %}
         <div class="alert alert-warning" style="margin-bottom: 1rem;">
@@ -24,7 +24,8 @@
         </div>
         {% endif %}
 
-        <div class="section-title">Registrar Salário</div>
+        <section class="receita-section receita-section-salario">
+        <div class="section-title section-title-salario">REGISTRAR SALÁRIO</div>
         <form method="POST">
             <input type="hidden" name="action" value="salario">
             <div class="row form-row">
@@ -51,8 +52,8 @@
         </form>
 
         <div style="margin-top: 0.75rem;">
-            <h5 style="margin-bottom: 0.5rem;">Salários Recebidos</h5>
-            <div class="table">
+            <h5 class="subsection-title">Salários Recebidos</h5>
+            <div class="table table-blue">
                 <table>
                     <thead>
                         <tr>
@@ -140,10 +141,12 @@
                 </table>
             </div>
         </div>
+        </section>
 
-        <br>
+        <div class="receita-section-divider"></div>
 
-        <div class="section-title">Registrar Receita</div>
+        <section class="receita-section receita-section-extra">
+        <div class="section-title section-title-extra">REGISTRAR RECEITA</div>
         <form method="POST">
             <input type="hidden" name="action" value="extra">
             <div class="form-group">
@@ -205,11 +208,14 @@
                 </div>
             </div>
         </form>
+        </section>
 
-        <br>
-        <h4>Receitas Agendadas</h4>
+        <div class="receita-section-divider receita-section-divider-strong"></div>
+
+        <section class="receita-section receita-section-listas receita-section-agendadas">
+        <h4 class="subsection-title">Receitas Agendadas</h4>
         {% if extras %}
-        <div class="table">
+        <div class="table table-orange">
             <table>
                 <thead>
                     <tr>
@@ -317,11 +323,14 @@
         {% else %}
         <p>Nenhuma receita agendada.</p>
         {% endif %}
+        </section>
 
-        <br>
-        <h4>Receitas Recebidas</h4>
+        <div class="receita-section-divider"></div>
+
+        <section class="receita-section receita-section-listas receita-section-recebidas">
+        <h4 class="subsection-title">Receitas Recebidas</h4>
         {% if lancamentos_extras_tabela %}
-        <div class="table">
+        <div class="table table-green">
             <table>
                 <thead>
                     <tr>
@@ -423,6 +432,7 @@
         {% else %}
         <p>Nenhum lançamento de receita ainda.</p>
         {% endif %}
+        </section>
     </div>
 
     {% for saldo in saldos %}
