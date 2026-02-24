@@ -2,6 +2,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
 from datetime import datetime, date
 import sys
+import os
 from pathlib import Path
 
 # Adiciona o diretÃ³rio raiz ao path
@@ -17,7 +18,7 @@ from finance_app.services import (
 )
 
 app = Flask(__name__)
-app.secret_key = 'fechou-mes-secret-key-2024'  # Mude em produÃ§Ã£o!
+app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
 
 # Inicializa banco de dados
 setup_database()
