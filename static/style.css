@@ -5,6 +5,14 @@
     box-sizing: border-box;
 }
 
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow-x: hidden;
+}
+
 :root {
     --primary-blue: #1e3a8a;
     --primary-blue-light: #1e40af;
@@ -28,6 +36,8 @@ body {
 .app-container {
     display: flex;
     min-height: 100vh;
+    max-width: 100vw;
+    overflow-x: hidden;
 }
 
 /* Sidebar */
@@ -37,6 +47,8 @@ body {
     color: white;
     padding: 1.5rem 0;
     position: fixed;
+    top: 0;
+    left: 0;
     height: 100vh;
     overflow-y: auto;
 }
@@ -95,6 +107,12 @@ body {
     flex: 1;
     margin-left: 250px;
     padding: 2rem;
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+.mobile-menu-btn {
+    display: none;
 }
 
 /* Flash Messages */
@@ -650,6 +668,7 @@ body {
 }
 
 .form-group input[type="text"],
+.form-group input[type="password"],
 .form-group input[type="number"],
 .form-group input[type="date"],
 .form-group select,
@@ -830,28 +849,154 @@ body {
     font-size: 0.95rem;
 }
 
+/* Tabs base */
+.nav.nav-tabs {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.nav.nav-tabs .nav-link {
+    white-space: nowrap;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
+    .mobile-menu-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: fixed;
+        top: 0.75rem;
+        left: 0.75rem;
+        width: 2.25rem;
+        height: 2.25rem;
+        border: none;
+        border-radius: 8px;
+        background: #1e3a8a;
+        color: #fff;
+        font-size: 1.2rem;
+        z-index: 1200;
+        box-shadow: 0 4px 12px rgba(30, 58, 138, 0.35);
+    }
+
     .sidebar {
-        width: 200px;
+        width: 270px;
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        z-index: 1100;
+    }
+    .sidebar.open {
+        transform: translateX(0);
+    }
+    .app-container.sidebar-open::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.35);
+        z-index: 1050;
     }
     .main-content {
-        margin-left: 200px;
-        padding: 1rem;
+        margin-left: 0 !important;
+        width: 100vw !important;
+        max-width: 100vw !important;
+        padding: 3.6rem 0.9rem 0.9rem;
+        overflow-x: hidden !important;
     }
-    .col {
-        flex: 0 0 100%;
+    .app-container {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        overflow-x: hidden !important;
     }
-    .col-2,
-    .col-3,
-    .col-4 {
-        flex: 0 0 100%;
+    .main-content h1 {
+        font-size: 2rem;
+        line-height: 1.15;
+        margin-bottom: 1rem !important;
+    }
+    .main-content h3,
+    .main-content h4 {
+        font-size: 1.15rem;
+    }
+    .main-content h5 {
+        font-size: 1.02rem;
+    }
+    .nav.nav-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 0.35rem;
+    }
+    .nav.nav-tabs .nav-item {
+        flex: 0 0 auto;
+    }
+    .row > .col,
+    .row > [class^="col-"],
+    .row > [class*=" col-"] {
+        flex: 0 0 100% !important;
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    .row {
+        margin: 0;
+    }
+    .row > .col,
+    .row > [class^="col-"],
+    .row > [class*=" col-"] {
+        padding: 0.35rem 0;
+    }
+    .receita-row {
+        grid-template-columns: 1fr;
+    }
+    .section-title {
+        margin: 1.1rem 0 0.8rem 0;
+    }
+    .card-value {
+        font-size: 1.6rem;
+    }
+    .btn {
+        white-space: normal;
+    }
+    .table {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
+    .table table {
+        min-width: 760px;
+    }
+    .table th,
+    .table td {
+        white-space: nowrap;
+        word-break: normal;
+        overflow-wrap: normal;
+        padding: 0.75rem 0.55rem;
+        font-size: 0.92rem;
+    }
+    .form-group input[type="text"],
+    .form-group input[type="password"],
+    .form-group input[type="number"],
+    .form-group input[type="date"],
+    .form-group select,
+    .form-group textarea {
+        font-size: 16px;
+    }
+    .metric-container,
+    .btn,
+    .sidebar-nav .nav-item {
+        transition: none;
+    }
+    .metric-container:hover {
+        transform: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     }
     .form-row .form-action-col {
         align-items: stretch;
         margin-top: 0.75rem;
     }
     .form-row .form-action-col .btn {
+        width: 100%;
+    }
+    .form-row .btn,
+    .compact-person-form .btn {
         width: 100%;
     }
     .compact-person-form .form-action-col {

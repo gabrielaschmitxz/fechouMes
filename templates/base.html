@@ -10,8 +10,10 @@
 </head>
 <body>
     <div class="app-container">
+        <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Abrir menu">☰</button>
+
         <!-- Sidebar -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="appSidebar">
             <div class="sidebar-header">
                 <h2>Fechou Mês</h2>
                 <p>Controle Financeiro</p>
@@ -28,6 +30,11 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            {% if session.get('user_id') %}
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 0.75rem;">
+                    <a href="{{ url_for('logout') }}" class="btn btn-secondary btn-sm">Sair</a>
+                </div>
+            {% endif %}
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     <div class="flash-messages">
@@ -47,6 +54,25 @@
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <script>
         (function () {
+            function initMobileSidebar() {
+                const btn = document.getElementById("mobileMenuBtn");
+                const sidebar = document.getElementById("appSidebar");
+                const container = document.querySelector(".app-container");
+                if (!btn || !sidebar || !container) return;
+
+                btn.addEventListener("click", function () {
+                    sidebar.classList.toggle("open");
+                    container.classList.toggle("sidebar-open");
+                });
+
+                sidebar.querySelectorAll("a.nav-item").forEach(function (link) {
+                    link.addEventListener("click", function () {
+                        sidebar.classList.remove("open");
+                        container.classList.remove("sidebar-open");
+                    });
+                });
+            }
+
             function formatMoneyFromDigits(digits) {
                 const numeric = Number(digits || "0") / 100;
                 return new Intl.NumberFormat("pt-BR", {
@@ -97,6 +123,7 @@
             }
 
             document.addEventListener("DOMContentLoaded", function () {
+                initMobileSidebar();
                 document.querySelectorAll("input.money-input").forEach(initMoneyInput);
 
                 document.querySelectorAll("form").forEach(function (form) {

@@ -11,10 +11,10 @@ def listar_pessoas(only_ativas: bool = True) -> List[Pessoa]:
     cur = conn.cursor()
     if only_ativas: # Removed get_cursor(conn) and used conn.cursor()
         cur.execute(
-            "SELECT id, nome, ativo, padrao FROM pessoas WHERE ativo = TRUE ORDER BY nome COLLATE NOCASE;"
+            "SELECT id, nome, ativo, padrao FROM pessoas WHERE ativo = TRUE ORDER BY LOWER(nome);"
         )
     else:
-        cur.execute("SELECT id, nome, ativo, padrao FROM pessoas ORDER BY nome COLLATE NOCASE;")
+        cur.execute("SELECT id, nome, ativo, padrao FROM pessoas ORDER BY LOWER(nome);")
     rows = cur.fetchall()
     conn.close()
     return [

@@ -1,6 +1,7 @@
 ﻿"""AplicaÃ§Ã£o Flask principal para Fechou MÃªs - Controle Financeiro"""
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from datetime import datetime, date
+from decimal import Decimal
 import sys
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from finance_app.services import (
     gastos_service,
     contas_service,
     pessoas_service,
+    auth_service,
 )
 
 app = Flask(__name__)
@@ -49,6 +51,61 @@ def _parse_brl_value(raw_value, default=0.0):
         return default
 
 
+def _to_float(value, default=0.0):
+    if value is None:
+        return default
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@app.before_request
+def _require_login():
+    if request.path == "/favicon.ico":
+        return "", 204
+    public_endpoints = {"login", "static"}
+    if request.endpoint is None or request.endpoint in public_endpoints:
+        return
+    if session.get("user_id"):
+        return
+    return redirect(url_for("login", next=request.path))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Tela de login."""
+    if session.get("user_id"):
+        return redirect(url_for("dashboard"))
+
+    if request.method == 'POST':
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        user = auth_service.autenticar_usuario(username, password)
+        if user:
+            session["user_id"] = user["id"]
+            session["username"] = user["username"]
+            next_url = request.args.get("next")
+            if not next_url or not next_url.startswith("/"):
+                next_url = url_for("dashboard")
+            return redirect(next_url)
+        flash('Usuário ou senha inválidos.', 'warning')
+
+    return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    """Encerra a sessão do usuário."""
+    session.clear()
+    flash('Sessão encerrada com sucesso.', 'info')
+    return redirect(url_for('login'))
+
+
 @app.route('/')
 def index():
     """Redireciona para dashboard"""
@@ -80,9 +137,9 @@ def dashboard():
     total_mes_terc, total_pago_terc, saldo_pend_terc = pessoas_service.calcular_totais_gerais_terceiros(mes, ano)
     
     total_despesas = (
-        totais_contas["total"]
-        + fatura_info["total_geral"]
-        + totais_pix["total_geral"]
+        _to_float(totais_contas.get("total"))
+        + _to_float(fatura_info.get("total_geral"))
+        + _to_float(totais_pix.get("total_geral"))
     )
     saldo_restante = total_geral - total_despesas
     
