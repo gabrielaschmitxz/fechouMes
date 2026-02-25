@@ -97,8 +97,13 @@ def registrar_compra_avista(
     descricao: str,
     valor: float,
     pessoa_id: int | None,
+    mes_referencia: int | None = None,
+    ano_referencia: int | None = None,
 ) -> None:
-    mes_ref, ano_ref = mes_ano_fatura_atual()
+    if mes_referencia is None or ano_referencia is None:
+        mes_ref, ano_ref = mes_ano_fatura_atual()
+    else:
+        mes_ref, ano_ref = mes_referencia, ano_referencia
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
@@ -265,17 +270,22 @@ def excluir_parcelada(lancamento_id: int) -> bool:
 
 
 def atualizar_avista(
-    lancamento_id: int, descricao: str, valor: float, pessoa_id: int | None
+    lancamento_id: int,
+    descricao: str,
+    valor: float,
+    pessoa_id: int | None,
+    mes_referencia: int,
+    ano_referencia: int,
 ) -> bool:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         """
         UPDATE cartao_avista
-        SET descricao = ?, valor = ?, pessoa_id = ?
+        SET descricao = ?, valor = ?, pessoa_id = ?, mes_referencia = ?, ano_referencia = ?
         WHERE id = ?;
         """,
-        (descricao, valor, pessoa_id, lancamento_id),
+        (descricao, valor, pessoa_id, mes_referencia, ano_referencia, lancamento_id),
     )
     ok = cur.rowcount > 0
     conn.commit()
@@ -291,13 +301,15 @@ def atualizar_parcelada(
     total_parcelas: int,
     status: str,
     pessoa_id: int | None,
+    mes_inicio: int,
+    ano_inicio: int,
 ) -> bool:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
         """
         UPDATE cartao_parceladas
-        SET descricao = ?, valor_parcela = ?, parcela_atual = ?, total_parcelas = ?, status = ?, pessoa_id = ?
+        SET descricao = ?, valor_parcela = ?, parcela_atual = ?, total_parcelas = ?, status = ?, pessoa_id = ?, mes_inicio = ?, ano_inicio = ?
         WHERE id = ?;
         """,
         (
@@ -307,6 +319,8 @@ def atualizar_parcelada(
             total_parcelas,
             status,
             pessoa_id,
+            mes_inicio,
+            ano_inicio,
             lancamento_id,
         ),
     )

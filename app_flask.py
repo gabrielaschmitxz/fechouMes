@@ -31,6 +31,54 @@ def _mes_ano_atual():
     hoje = datetime.now()
     return hoje.month, hoje.year
 
+
+_MESES_NOMES = [
+    "",
+    "Janeiro",
+    "Fevereiro",
+    "Março",
+    "Abril",
+    "Maio",
+    "Junho",
+    "Julho",
+    "Agosto",
+    "Setembro",
+    "Outubro",
+    "Novembro",
+    "Dezembro",
+]
+
+
+def _normalizar_competencia(mes_raw, ano_raw, mes_padrao: int, ano_padrao: int):
+    try:
+        mes = int(mes_raw)
+        ano = int(ano_raw)
+    except (TypeError, ValueError):
+        return mes_padrao, ano_padrao
+    if mes < 1 or mes > 12:
+        return mes_padrao, ano_padrao
+    if ano < 2000 or ano > 2100:
+        return mes_padrao, ano_padrao
+    return mes, ano
+
+
+def _listar_competencias(base_mes: int, base_ano: int):
+    competencias = []
+    inicio = (base_ano * 12 + base_mes - 1) - 12
+    fim = (base_ano * 12 + base_mes - 1) + 18
+    for indice in range(inicio, fim + 1):
+        ano = indice // 12
+        mes = (indice % 12) + 1
+        competencias.append(
+            {
+                "mes": mes,
+                "ano": ano,
+                "label": f"{mes:02d}/{ano} - {_MESES_NOMES[mes]}",
+            }
+        )
+    return competencias
+
+
 def _parse_brl_value(raw_value, default=0.0):
     if raw_value is None:
         return default
@@ -436,6 +484,7 @@ def receitas():
 def cartao():
     """PÃ¡gina do cartÃ£o de crÃ©dito"""
     cfg = cartao_service.get_config()
+    mes_comp_padrao, ano_comp_padrao = cartao_service.mes_ano_fatura_atual()
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -467,6 +516,12 @@ def cartao():
             total_parcelas = int(request.form.get('total_parcelas', 1))
             parcela_atual = int(request.form.get('parcela_atual', 1))
             modo_valor = request.form.get('modo_valor', 'total')
+            mes_competencia, ano_competencia = _normalizar_competencia(
+                request.form.get('mes_competencia'),
+                request.form.get('ano_competencia'),
+                mes_comp_padrao,
+                ano_comp_padrao,
+            )
             
             if not descricao or valor_compra <= 0:
                 flash('Informe descriÃ§Ã£o e valor maior que zero.', 'warning')
@@ -479,14 +534,19 @@ def cartao():
                     flash('Parcela atual deve estar entre 1 e o total de parcelas.', 'warning')
                     return redirect(url_for('cartao'))
             
-            mes_inicio, ano_inicio = _mes_ano_atual()
             if avista:
-                cartao_service.registrar_compra_avista(descricao, valor_compra, pessoa_id)
+                cartao_service.registrar_compra_avista(
+                    descricao,
+                    valor_compra,
+                    pessoa_id,
+                    mes_competencia,
+                    ano_competencia,
+                )
             else:
                 valor_total = valor_compra * total_parcelas if modo_valor == 'parcela' else valor_compra
                 cartao_service.criar_parcelada(
                     descricao, valor_total, total_parcelas,
-                    mes_inicio, ano_inicio, pessoa_id, parcela_atual
+                    mes_competencia, ano_competencia, pessoa_id, parcela_atual
                 )
             flash('Compra registrada com sucesso.', 'success')
             return redirect(url_for('cartao'))
@@ -516,6 +576,12 @@ def cartao():
             valor = _parse_brl_value(request.form.get('valor'), 0.0)
             pessoa_id_str = request.form.get('pessoa_id', '')
             pessoa_id = int(pessoa_id_str) if pessoa_id_str else None
+            mes_competencia, ano_competencia = _normalizar_competencia(
+                request.form.get('mes_competencia'),
+                request.form.get('ano_competencia'),
+                mes_comp_padrao,
+                ano_comp_padrao,
+            )
 
             if lancamento_id <= 0 or not descricao or valor <= 0:
                 flash('Dados inválidos para edição.', 'warning')
@@ -523,7 +589,12 @@ def cartao():
 
             if tipo == 'avista':
                 ok = cartao_service.atualizar_avista(
-                    lancamento_id, descricao, valor, pessoa_id
+                    lancamento_id,
+                    descricao,
+                    valor,
+                    pessoa_id,
+                    mes_competencia,
+                    ano_competencia,
                 )
             elif tipo == 'parcelado':
                 total_parcelas = int(request.form.get('total_parcelas', 1))
@@ -543,6 +614,8 @@ def cartao():
                     total_parcelas,
                     status,
                     pessoa_id,
+                    mes_competencia,
+                    ano_competencia,
                 )
             else:
                 ok = False
@@ -556,21 +629,45 @@ def cartao():
     info = cartao_service.calcular_fatura_atual()
     pessoas = pessoas_service.listar_pessoas()
     lancamentos_todos = cartao_service.listar_todos_lancamentos()
+    competencias = _listar_competencias(mes_comp_padrao, ano_comp_padrao)
+    anos_competencia = sorted(
+        {c["ano"] for c in competencias}.union({int(l["ano_ref"]) for l in lancamentos_todos})
+    )
     pessoa_nome_por_id = {p.id: p.nome for p in pessoas}
     for l in lancamentos_todos:
         l["pessoa_nome"] = pessoa_nome_por_id.get(l.get("pessoa_id")) or "Nosso"
-        l["periodo"] = f'{int(l["mes_ref"]):02d}/{int(l["ano_ref"])}'
+        mes_ref = int(l["mes_ref"])
+        ano_ref = int(l["ano_ref"])
+        l["periodo"] = f'{mes_ref:02d}/{ano_ref} - {_MESES_NOMES[mes_ref]}'
         if l["tipo"] == "parcelado":
             l["parcelas_label"] = f'{int(l["parcela_atual"])}/{int(l["total_parcelas"])}'
         else:
             l["parcelas_label"] = "-"
+    lancamentos_por_competencia = []
+    grupo_atual = None
+    for l in lancamentos_todos:
+        chave = (int(l["ano_ref"]), int(l["mes_ref"]))
+        if grupo_atual is None or grupo_atual["chave"] != chave:
+            ano_ref, mes_ref = chave
+            grupo_atual = {
+                "chave": chave,
+                "titulo": f'{mes_ref:02d}/{ano_ref} - {_MESES_NOMES[mes_ref]}',
+                "lancamentos": [],
+            }
+            lancamentos_por_competencia.append(grupo_atual)
+        grupo_atual["lancamentos"].append(l)
     
     return render_template(
         'cartao.html',
         cfg=cfg,
         info=info,
         pessoas=pessoas,
+        competencias=competencias,
+        anos_competencia=anos_competencia,
+        mes_comp_padrao=mes_comp_padrao,
+        ano_comp_padrao=ano_comp_padrao,
         lancamentos_todos=lancamentos_todos,
+        lancamentos_por_competencia=lancamentos_por_competencia,
     )
 
 

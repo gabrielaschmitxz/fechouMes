@@ -4,6 +4,7 @@
 
 {% block content %}
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Cartão de Crédito</h1>
+{% set meses = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
 
 <ul class="nav nav-tabs cartao-tabs" role="tablist">
     <li class="nav-item">
@@ -150,6 +151,26 @@
                 <input type="number" name="parcela_atual" id="parcela_atual" min="1" value="1">
             </div>
         </div>
+        <div class="col-3">
+            <div class="form-group">
+                <label>Competência (mês)</label>
+                <select name="mes_competencia" required>
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == mes_comp_padrao %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Competência (ano)</label>
+                <select name="ano_competencia" required>
+                    {% for a in anos_competencia %}
+                        <option value="{{ a }}" {% if a == ano_comp_padrao %}selected{% endif %}>{{ a }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
     </div>
     <button type="submit" class="btn btn-primary">Registrar compra</button>
 </form>
@@ -160,112 +181,147 @@
 <div class="tab-pane fade" id="tab-cartao-lancamentos" role="tabpanel">
     <section class="cartao-section cartao-section-lancamentos">
     <div class="section-title">Todos os lançamentos</div>
-    {% if lancamentos_todos %}
-    <div class="table table-blue">
-        <table>
-            <thead>
-                <tr>
-                    <th>Tipo</th>
-                    <th>Descrição</th>
-                    <th>Valor</th>
-                    <th>Parcelas</th>
-                    <th>Status</th>
-                    <th>Pessoa</th>
-                    <th>Período</th>
-                    <th>Ações</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for l in lancamentos_todos %}
-                <tr>
-                    <td>{% if l.tipo == 'avista' %}À vista{% else %}Parcelado{% endif %}</td>
-                    <td>{{ l.descricao }}</td>
-                    <td>R$ {{ "{:,.2f}".format(l.valor) }}</td>
-                    <td>{{ l.parcelas_label }}</td>
-                    <td>{{ l.status }}</td>
-                    <td>{{ l.pessoa_nome }}</td>
-                    <td>{{ l.periodo }}</td>
-                    <td>
-                        <button
-                            type="button"
-                            class="btn btn-warning btn-sm"
-                            data-toggle="collapse"
-                            data-target="#editar-cartao-{{ l.tipo }}-{{ l.id }}"
-                            aria-expanded="false"
-                            aria-controls="editar-cartao-{{ l.tipo }}-{{ l.id }}">
-                            Editar
-                        </button>
-                        <form method="POST" style="display:inline;">
-                            <input type="hidden" name="action" value="excluir_lancamento">
-                            <input type="hidden" name="tipo" value="{{ l.tipo }}">
-                            <input type="hidden" name="lancamento_id" value="{{ l.id }}">
-                            <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
-                        </form>
-                    </td>
-                </tr>
-                <tr class="collapse" id="editar-cartao-{{ l.tipo }}-{{ l.id }}">
-                    <td colspan="8">
-                        <form method="POST">
-                            <input type="hidden" name="action" value="editar_lancamento">
-                            <input type="hidden" name="tipo" value="{{ l.tipo }}">
-                            <input type="hidden" name="lancamento_id" value="{{ l.id }}">
-                            <div class="row form-row">
-                                <div class="col-3">
-                                    <div class="form-group">
-                                        <label>Descrição</label>
-                                        <input type="text" name="descricao" value="{{ l.descricao }}" required>
+    {% if lancamentos_por_competencia %}
+    <ul class="nav nav-tabs cartao-tabs" role="tablist" style="margin-bottom: 0.75rem;">
+        {% for grupo in lancamentos_por_competencia %}
+        <li class="nav-item">
+            <a class="nav-link {% if loop.first %}active{% endif %}" data-toggle="tab" href="#tab-competencia-{{ loop.index }}" role="tab">
+                {{ grupo.titulo }}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    <div class="tab-content cartao-tab-content">
+        {% for grupo in lancamentos_por_competencia %}
+        <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="tab-competencia-{{ loop.index }}" role="tabpanel">
+            <div class="table table-blue" style="margin-bottom: 1rem;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tipo</th>
+                            <th>Descrição</th>
+                            <th>Valor</th>
+                            <th>Parcelas</th>
+                            <th>Status</th>
+                            <th>Pessoa</th>
+                            <th>Competência</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for l in grupo.lancamentos %}
+                        <tr>
+                            <td>{% if l.tipo == 'avista' %}À vista{% else %}Parcelado{% endif %}</td>
+                            <td>{{ l.descricao }}</td>
+                            <td>R$ {{ "{:,.2f}".format(l.valor) }}</td>
+                            <td>{{ l.parcelas_label }}</td>
+                            <td>{{ l.status }}</td>
+                            <td>{{ l.pessoa_nome }}</td>
+                            <td>{{ l.periodo }}</td>
+                            <td>
+                                <button
+                                    type="button"
+                                    class="btn btn-warning btn-sm"
+                                    data-toggle="collapse"
+                                    data-target="#editar-cartao-{{ l.tipo }}-{{ l.id }}"
+                                    aria-expanded="false"
+                                    aria-controls="editar-cartao-{{ l.tipo }}-{{ l.id }}">
+                                    Editar
+                                </button>
+                                <form method="POST" style="display:inline;">
+                                    <input type="hidden" name="action" value="excluir_lancamento">
+                                    <input type="hidden" name="tipo" value="{{ l.tipo }}">
+                                    <input type="hidden" name="lancamento_id" value="{{ l.id }}">
+                                    <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                </form>
+                            </td>
+                        </tr>
+                        <tr class="collapse" id="editar-cartao-{{ l.tipo }}-{{ l.id }}">
+                            <td colspan="8">
+                                <form method="POST">
+                                    <input type="hidden" name="action" value="editar_lancamento">
+                                    <input type="hidden" name="tipo" value="{{ l.tipo }}">
+                                    <input type="hidden" name="lancamento_id" value="{{ l.id }}">
+                                    <div class="row form-row">
+                                        <div class="col-3">
+                                            <div class="form-group">
+                                                <label>Descrição</label>
+                                                <input type="text" name="descricao" value="{{ l.descricao }}" required>
+                                            </div>
+                                        </div>
+                                        <div class="col-2">
+                                            <div class="form-group">
+                                                <label>{% if l.tipo == 'parcelado' %}Valor parcela (R$){% else %}Valor (R$){% endif %}</label>
+                                                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" value="{{ '%.2f'|format(l.valor) }}" required>
+                                            </div>
+                                        </div>
+                                        <div class="col-2">
+                                            <div class="form-group">
+                                                <label>Pessoa</label>
+                                                <select name="pessoa_id">
+                                                    <option value="" {% if l.pessoa_id is none %}selected{% endif %}>(Nosso)</option>
+                                                    {% for p in pessoas %}
+                                                        <option value="{{ p.id }}" {% if p.id == l.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-2">
+                                            <div class="form-group">
+                                                <label>Competência (mês)</label>
+                                                <select name="mes_competencia" required>
+                                                    {% for m in range(1, 13) %}
+                                                        <option value="{{ m }}" {% if m == l.mes_ref %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-1">
+                                            <div class="form-group">
+                                                <label>Ano</label>
+                                                <select name="ano_competencia" required>
+                                                    {% for a in anos_competencia %}
+                                                        <option value="{{ a }}" {% if a == l.ano_ref %}selected{% endif %}>{{ a }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        {% if l.tipo == 'parcelado' %}
+                                        <div class="col-1">
+                                            <div class="form-group">
+                                                <label>Parcela atual</label>
+                                                <input type="number" name="parcela_atual" min="1" value="{{ l.parcela_atual }}" required>
+                                            </div>
+                                        </div>
+                                        <div class="col-1">
+                                            <div class="form-group">
+                                                <label>Total</label>
+                                                <input type="number" name="total_parcelas" min="1" value="{{ l.total_parcelas }}" required>
+                                            </div>
+                                        </div>
+                                        <div class="col-2">
+                                            <div class="form-group">
+                                                <label>Status</label>
+                                                <select name="status">
+                                                    <option value="Ativa" {% if l.status == 'Ativa' %}selected{% endif %}>Ativa</option>
+                                                    <option value="Finalizada" {% if l.status == 'Finalizada' %}selected{% endif %}>Finalizada</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        {% endif %}
+                                        <div class="col-1 form-action-col">
+                                            <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="col-2">
-                                    <div class="form-group">
-                                        <label>{% if l.tipo == 'parcelado' %}Valor parcela (R$){% else %}Valor (R$){% endif %}</label>
-                                        <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" value="{{ '%.2f'|format(l.valor) }}" required>
-                                    </div>
-                                </div>
-                                <div class="col-2">
-                                    <div class="form-group">
-                                        <label>Pessoa</label>
-                                        <select name="pessoa_id">
-                                            <option value="" {% if l.pessoa_id is none %}selected{% endif %}>(Nosso)</option>
-                                            {% for p in pessoas %}
-                                                <option value="{{ p.id }}" {% if p.id == l.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
-                                            {% endfor %}
-                                        </select>
-                                    </div>
-                                </div>
-                                {% if l.tipo == 'parcelado' %}
-                                <div class="col-1">
-                                    <div class="form-group">
-                                        <label>Parcela atual</label>
-                                        <input type="number" name="parcela_atual" min="1" value="{{ l.parcela_atual }}" required>
-                                    </div>
-                                </div>
-                                <div class="col-1">
-                                    <div class="form-group">
-                                        <label>Total</label>
-                                        <input type="number" name="total_parcelas" min="1" value="{{ l.total_parcelas }}" required>
-                                    </div>
-                                </div>
-                                <div class="col-2">
-                                    <div class="form-group">
-                                        <label>Status</label>
-                                        <select name="status">
-                                            <option value="Ativa" {% if l.status == 'Ativa' %}selected{% endif %}>Ativa</option>
-                                            <option value="Finalizada" {% if l.status == 'Finalizada' %}selected{% endif %}>Finalizada</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                {% endif %}
-                                <div class="col-1 form-action-col">
-                                    <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
-                                </div>
-                            </div>
-                        </form>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
     </div>
     {% else %}
     <p>Nenhum lançamento encontrado.</p>
