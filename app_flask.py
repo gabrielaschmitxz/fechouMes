@@ -826,12 +826,8 @@ def contas_fixas():
 @app.route('/pessoas', methods=['GET', 'POST'])
 def pessoas():
     """PÃ¡gina de pessoas (terceiros)"""
-    try:
-        mes_padrao, ano_padrao = cartao_service.mes_ano_fatura_atual()
-    except Exception:
-        mes_padrao, ano_padrao = _mes_ano_atual()
-    mes = request.args.get('mes', type=int, default=mes_padrao)
-    ano = request.args.get('ano', type=int, default=ano_padrao)
+    mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
+    ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
     
     if request.method == 'POST':
         action = request.form.get('action')
