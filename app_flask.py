@@ -828,6 +828,17 @@ def pessoas():
     """PÃ¡gina de pessoas (terceiros)"""
     mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
     ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
+    mes_cartao_alt = None
+    ano_cartao_alt = None
+    if request.args.get('mes') is None and request.args.get('ano') is None:
+        try:
+            mes_cartao, ano_cartao = cartao_service.mes_ano_fatura_atual()
+            if (mes_cartao, ano_cartao) != (mes, ano):
+                mes_cartao_alt = mes_cartao
+                ano_cartao_alt = ano_cartao
+        except Exception:
+            mes_cartao_alt = None
+            ano_cartao_alt = None
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -886,7 +897,7 @@ def pessoas():
             itens_tokens = request.form.getlist('conta_paga')
 
             total = pessoas_service.registrar_pagamento_terceiro_por_itens(
-                pessoa_id, itens_tokens, mes, ano
+                pessoa_id, itens_tokens, mes, ano, mes_cartao_alt, ano_cartao_alt
             )
             if total > 0:
                 flash(f'Pagamento registrado: R$ {total:,.2f}.', 'success')
@@ -912,7 +923,7 @@ def pessoas():
     contas_status_por_pessoa = {}
     for p in pessoas_ativas:
         contas_status_por_pessoa[p.id] = pessoas_service.listar_contas_status_pessoa(
-            p.id, mes, ano
+            p.id, mes, ano, mes_cartao_alt, ano_cartao_alt
         )
     
     return render_template('pessoas.html',

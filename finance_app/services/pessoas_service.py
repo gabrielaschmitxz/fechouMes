@@ -102,7 +102,11 @@ def atualizar_padrao_pessoa(pessoa_id: int, padrao: bool) -> None:
 
 
 def listar_contas_pendentes_pessoa(
-    pessoa_id: int, mes_referencia: int, ano_referencia: int
+    pessoa_id: int,
+    mes_referencia: int,
+    ano_referencia: int,
+    mes_cartao_referencia: int | None = None,
+    ano_cartao_referencia: int | None = None,
 ) -> List[Dict[str, float | int | str]]:
     conn = get_connection()
     cur = conn.cursor()
@@ -133,28 +137,43 @@ def listar_contas_pendentes_pessoa(
     )
     pendentes.extend(dict(r) for r in cur.fetchall())
 
+    competencias_cartao = {(mes_referencia, ano_referencia)}
+    if (
+        mes_cartao_referencia is not None
+        and ano_cartao_referencia is not None
+        and (mes_cartao_referencia, ano_cartao_referencia) != (mes_referencia, ano_referencia)
+    ):
+        competencias_cartao.add((mes_cartao_referencia, ano_cartao_referencia))
+    filtros_cartao = " OR ".join(
+        ["(ca.mes_referencia = ? AND ca.ano_referencia = ?)"] * len(competencias_cartao)
+    )
+    params_cartao: List[int] = [pessoa_id]
+    for mes_ref, ano_ref in sorted(competencias_cartao):
+        params_cartao.extend([mes_ref, ano_ref])
+    params_cartao.append(pessoa_id)
     cur.execute(
-        """
+        f"""
         SELECT
             'cartao_avista' AS tipo,
             ca.id AS item_id,
             ('Cartão à vista: ' || ca.descricao) AS descricao,
-            ca.valor AS valor
+            ca.valor AS valor,
+            ca.mes_referencia AS mes_referencia,
+            ca.ano_referencia AS ano_referencia
         FROM cartao_avista ca
         WHERE ca.pessoa_id = ?
-          AND ca.mes_referencia = ?
-          AND ca.ano_referencia = ?
+          AND ({filtros_cartao})
           AND NOT EXISTS (
               SELECT 1
               FROM pagamentos_terceiros_itens pi
               WHERE pi.pessoa_id = ?
                 AND pi.tipo = 'cartao_avista'
                 AND pi.item_id = ca.id
-                AND pi.mes_referencia = ?
-                AND pi.ano_referencia = ?
+                AND pi.mes_referencia = ca.mes_referencia
+                AND pi.ano_referencia = ca.ano_referencia
           );
         """,
-        (pessoa_id, mes_referencia, ano_referencia, pessoa_id, mes_referencia, ano_referencia),
+        tuple(params_cartao),
     )
     pendentes.extend(dict(r) for r in cur.fetchall())
 
@@ -193,7 +212,11 @@ def listar_contas_pendentes_pessoa(
 
 
 def listar_contas_status_pessoa(
-    pessoa_id: int, mes_referencia: int, ano_referencia: int
+    pessoa_id: int,
+    mes_referencia: int,
+    ano_referencia: int,
+    mes_cartao_referencia: int | None = None,
+    ano_cartao_referencia: int | None = None,
 ) -> List[Dict[str, float | int | str | bool]]:
     conn = get_connection()
     cur = conn.cursor()
@@ -207,6 +230,8 @@ def listar_contas_status_pessoa(
             cp.id AS item_id,
             ('Cartão parcelado: ' || cp.descricao || ' (parcela ' || cp.parcela_atual || '/' || cp.total_parcelas || ')') AS descricao,
             cp.valor_parcela AS valor,
+            ? AS mes_referencia,
+            ? AS ano_referencia,
             EXISTS (
                 SELECT 1
                 FROM pagamentos_terceiros_itens pi
@@ -220,32 +245,47 @@ def listar_contas_status_pessoa(
         WHERE cp.pessoa_id = ?
           AND cp.status = 'Ativa';
         """,
-        (pessoa_id, mes_referencia, ano_referencia, pessoa_id),
+        (mes_referencia, ano_referencia, pessoa_id, mes_referencia, ano_referencia, pessoa_id),
     )
     contas.extend(dict(r) for r in cur.fetchall())
 
+    competencias_cartao = {(mes_referencia, ano_referencia)}
+    if (
+        mes_cartao_referencia is not None
+        and ano_cartao_referencia is not None
+        and (mes_cartao_referencia, ano_cartao_referencia) != (mes_referencia, ano_referencia)
+    ):
+        competencias_cartao.add((mes_cartao_referencia, ano_cartao_referencia))
+    filtros_cartao = " OR ".join(
+        ["(ca.mes_referencia = ? AND ca.ano_referencia = ?)"] * len(competencias_cartao)
+    )
+    params_cartao: List[int] = [pessoa_id]
+    for mes_ref, ano_ref in sorted(competencias_cartao):
+        params_cartao.extend([mes_ref, ano_ref])
+    params_cartao.append(pessoa_id)
     cur.execute(
-        """
+        f"""
         SELECT
             'cartao_avista' AS tipo,
             ca.id AS item_id,
             ('Cartão à vista: ' || ca.descricao) AS descricao,
             ca.valor AS valor,
+            ca.mes_referencia AS mes_referencia,
+            ca.ano_referencia AS ano_referencia,
             EXISTS (
                 SELECT 1
                 FROM pagamentos_terceiros_itens pi
                 WHERE pi.pessoa_id = ?
                   AND pi.tipo = 'cartao_avista'
                   AND pi.item_id = ca.id
-                  AND pi.mes_referencia = ?
-                  AND pi.ano_referencia = ?
+                  AND pi.mes_referencia = ca.mes_referencia
+                  AND pi.ano_referencia = ca.ano_referencia
             ) AS pago
         FROM cartao_avista ca
         WHERE ca.pessoa_id = ?
-          AND ca.mes_referencia = ?
-          AND ca.ano_referencia = ?;
+          AND ({filtros_cartao});
         """,
-        (pessoa_id, mes_referencia, ano_referencia, pessoa_id, mes_referencia, ano_referencia),
+        tuple([params_cartao[-1]] + params_cartao[:-1]),
     )
     contas.extend(dict(r) for r in cur.fetchall())
 
@@ -256,6 +296,8 @@ def listar_contas_status_pessoa(
             gp.id AS item_id,
             ('Gasto Pix/Débito: ' || gp.descricao) AS descricao,
             gp.valor AS valor,
+            gp.mes_referencia AS mes_referencia,
+            gp.ano_referencia AS ano_referencia,
             EXISTS (
                 SELECT 1
                 FROM pagamentos_terceiros_itens pi
@@ -279,6 +321,8 @@ def listar_contas_status_pessoa(
     for item in contas:
         item["token"] = f"{item['tipo']}:{item['item_id']}"
         item["valor"] = float(item["valor"])
+        item["mes_referencia"] = int(item.get("mes_referencia", mes_referencia))
+        item["ano_referencia"] = int(item.get("ano_referencia", ano_referencia))
         item["pago"] = bool(item["pago"])
 
     return sorted(contas, key=lambda x: str(x["descricao"]).lower())
@@ -289,8 +333,16 @@ def registrar_pagamento_terceiro_por_itens(
     itens_tokens: List[str],
     mes_referencia: int,
     ano_referencia: int,
+    mes_cartao_referencia: int | None = None,
+    ano_cartao_referencia: int | None = None,
 ) -> float:
-    contas = listar_contas_status_pessoa(pessoa_id, mes_referencia, ano_referencia)
+    contas = listar_contas_status_pessoa(
+        pessoa_id,
+        mes_referencia,
+        ano_referencia,
+        mes_cartao_referencia,
+        ano_cartao_referencia,
+    )
     mapa = {str(c["token"]): c for c in contas if not bool(c["pago"])}
     selecionadas = [mapa[t] for t in itens_tokens if t in mapa]
 
@@ -313,6 +365,8 @@ def registrar_pagamento_terceiro_por_itens(
     pagamento_id = cur.lastrowid
 
     for item in selecionadas:
+        item_mes = int(item.get("mes_referencia", mes_referencia))
+        item_ano = int(item.get("ano_referencia", ano_referencia))
         cur.execute(
             """
             INSERT INTO pagamentos_terceiros_itens
@@ -326,8 +380,8 @@ def registrar_pagamento_terceiro_por_itens(
                 int(item["item_id"]),
                 str(item["descricao"]),
                 float(item["valor"]),
-                mes_referencia,
-                ano_referencia,
+                item_mes,
+                item_ano,
             ),
         )
 
