@@ -232,6 +232,41 @@ def registrar_receita_agendada(
     )
 
 
+def processar_receitas_agendadas_vencidas(data_base: Optional[date] = None) -> int:
+    """Converte lançamentos agendados (data <= hoje) para recebidos e aplica no saldo."""
+    hoje = data_base or date.today()
+    hoje_iso = hoje.isoformat()
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, saldo_id, valor
+        FROM receitas_lancamentos
+        WHERE tipo_origem = 'agendado'
+          AND data_recebimento IS NOT NULL
+          AND data_recebimento <= ?;
+        """,
+        (hoje_iso,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        conn.close()
+        return 0
+
+    for r in rows:
+        cur.execute(
+            "UPDATE receitas_saldos SET saldo_atual = saldo_atual + ? WHERE id = ?;",
+            (float(r["valor"]), int(r["saldo_id"])),
+        )
+        cur.execute(
+            "UPDATE receitas_lancamentos SET tipo_origem = 'extra' WHERE id = ?;",
+            (int(r["id"]),),
+        )
+    conn.commit()
+    conn.close()
+    return len(rows)
+
+
 def registrar_abatimento_beneficio(
     nome_pessoa: str,
     receita_extra_id: int,
@@ -365,7 +400,7 @@ def excluir_lancamento_receita(lancamento_id: int) -> bool:
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, saldo_id, valor
+        SELECT id, saldo_id, valor, tipo_origem
         FROM receitas_lancamentos
         WHERE id = ?;
         """,
@@ -378,11 +413,13 @@ def excluir_lancamento_receita(lancamento_id: int) -> bool:
 
     saldo_id = int(row["saldo_id"])
     valor = float(row["valor"])
+    tipo_origem = str(row["tipo_origem"])
 
-    cur.execute(
-        "UPDATE receitas_saldos SET saldo_atual = saldo_atual - ? WHERE id = ?;",
-        (valor, saldo_id),
-    )
+    if tipo_origem != "agendado":
+        cur.execute(
+            "UPDATE receitas_saldos SET saldo_atual = saldo_atual - ? WHERE id = ?;",
+            (valor, saldo_id),
+        )
     cur.execute("DELETE FROM receitas_lancamentos WHERE id = ?;", (lancamento_id,))
     conn.commit()
     conn.close()
@@ -399,7 +436,7 @@ def atualizar_lancamento_receita(
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, saldo_id, valor
+        SELECT id, saldo_id, valor, tipo_origem
         FROM receitas_lancamentos
         WHERE id = ?;
         """,
@@ -412,6 +449,7 @@ def atualizar_lancamento_receita(
 
     saldo_id = int(row["saldo_id"])
     valor_antigo = float(row["valor"])
+    tipo_origem = str(row["tipo_origem"])
     delta = valor_novo - valor_antigo
 
     cur.execute(
@@ -422,10 +460,11 @@ def atualizar_lancamento_receita(
         """,
         (categoria, descricao, valor_novo, lancamento_id),
     )
-    cur.execute(
-        "UPDATE receitas_saldos SET saldo_atual = saldo_atual + ? WHERE id = ?;",
-        (delta, saldo_id),
-    )
+    if tipo_origem != "agendado":
+        cur.execute(
+            "UPDATE receitas_saldos SET saldo_atual = saldo_atual + ? WHERE id = ?;",
+            (delta, saldo_id),
+        )
     conn.commit()
     conn.close()
     return True

@@ -120,13 +120,14 @@
                                 data-toggle="collapse"
                                 data-target="#editar-gasto-{{ g.id }}"
                                 aria-expanded="false"
-                                aria-controls="editar-gasto-{{ g.id }}">
-                                Editar
+                                aria-controls="editar-gasto-{{ g.id }}"
+                                title="Editar">
+                                &#9998;
                             </button>
                             <form method="POST" style="display: inline;">
                                 <input type="hidden" name="action" value="excluir_gasto">
                                 <input type="hidden" name="gasto_id" value="{{ g.id }}">
-                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
                             </form>
                         </td>
                     </tr>

@@ -34,18 +34,19 @@
 <!-- Abas Pessoas -->
 <ul class="nav nav-tabs pessoas-tabs" role="tablist">
     <li class="nav-item">
-        <a class="nav-link active" data-toggle="tab" href="#tab-cadastro-pessoa" role="tab">Cadastro</a>
+        <a class="nav-link {% if not pessoa_ativa_id %}active{% endif %}" href="{{ url_for('pessoas', mes=mes, ano=ano) }}" role="tab">Cadastro</a>
     </li>
     {% for r in resumos %}
     {% if not r.pessoa.padrao %}
     <li class="nav-item">
-        <a class="nav-link" data-toggle="tab" href="#tab-pessoa-{{ r.pessoa.id }}" role="tab">{{ r.pessoa.nome }}</a>
+        <a class="nav-link {% if pessoa_ativa_id == r.pessoa.id %}active{% endif %}" href="{{ url_for('pessoas', mes=mes, ano=ano, pessoa_id=r.pessoa.id) }}" role="tab">{{ r.pessoa.nome }}</a>
     </li>
     {% endif %}
     {% endfor %}
 </ul>
 
 <div class="tab-content pessoas-tab-content">
+    {% if not pessoa_ativa_id %}
     <div class="tab-pane fade show active" id="tab-cadastro-pessoa" role="tabpanel">
         <section class="pessoa-section pessoa-section-new">
         <div class="section-title">Nova pessoa</div>
@@ -72,6 +73,30 @@
 
         <section class="pessoa-section pessoa-section-list">
         <div class="section-title">Pessoas cadastradas</div>
+        <form method="GET" class="contas-filter" style="margin: 0.35rem 0 0.9rem;">
+            <div class="row form-row">
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Competência (mês)</label>
+                        <select name="mes">
+                            {% set meses = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
+                            {% for m in range(1, 13) %}
+                                <option value="{{ m }}" {% if m == mes %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Competência (ano)</label>
+                        <input type="number" name="ano" value="{{ ano }}" min="2000" max="2100">
+                    </div>
+                </div>
+                <div class="col-2 form-action-col">
+                    <button type="submit" class="btn btn-primary">Aplicar</button>
+                </div>
+            </div>
+        </form>
         {% if resumos %}
         <div class="table table-blue">
             <table>
@@ -112,14 +137,14 @@
                             </form>
                         </td>
                         <td>
-                            <button class="btn btn-warning btn-sm" type="button" data-toggle="collapse" data-target="#editForm{{ r.pessoa.id }}" aria-expanded="false" aria-controls="editForm{{ r.pessoa.id }}">
-                                Editar
+                            <button class="btn btn-warning btn-sm" type="button" data-toggle="collapse" data-target="#editForm{{ r.pessoa.id }}" aria-expanded="false" aria-controls="editForm{{ r.pessoa.id }}" title="Editar">
+                                &#9998;
                             </button>
                             <span style="display: inline-block; width: 0.35rem;"></span>
                             <form method="POST" style="display: inline;">
                                 <input type="hidden" name="action" value="excluir_pessoa">
                                 <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
-                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
                             </form>
                         </td>
                     </tr>
@@ -149,69 +174,195 @@
         {% endif %}
         </section>
     </div>
+    {% endif %}
 
     {% for r in resumos %}
-    {% if not r.pessoa.padrao %}
-    <div class="tab-pane fade" id="tab-pessoa-{{ r.pessoa.id }}" role="tabpanel">
+    {% if not r.pessoa.padrao and pessoa_ativa_id == r.pessoa.id %}
+    <div class="tab-pane fade show active" id="tab-pessoa-{{ r.pessoa.id }}" role="tabpanel">
         <section class="pessoa-section pessoa-section-receber" style="margin-top: 0.5rem;">
-            <div class="section-title">Receber pagamento</div>
-            {% set contas = contas_status_por_pessoa.get(r.pessoa.id, []) %}
-            {% if contas %}
-            <form method="POST">
-                <input type="hidden" name="action" value="registrar_pagamento_itens">
-                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+            {% set previsao = previsao_mes_por_pessoa.get(r.pessoa.id, {'meses': [], 'total_geral': 0.0}) %}
+            <div style="margin-top: 1rem;">
+                <h5 style="margin: 0 0 0.5rem 0;">Lançamentos por mês</h5>
+                <div style="font-weight: 700; margin-bottom: 0.5rem;">
+                    Total geral previsto: R$ {{ "{:,.2f}".format(previsao.total_geral_liquido if previsao.total_geral_liquido is defined else previsao.total_geral) }}
+                </div>
+                {% if previsao.meses %}
+                {% set meses_nome = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
+                <ul class="nav nav-tabs pessoas-tabs" role="tablist" style="margin-bottom: 0.75rem;">
+                    {% for m in previsao.meses %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if loop.first %}active{% endif %}" data-toggle="tab" href="#sub-mes-{{ r.pessoa.id }}-{{ loop.index0 }}" role="tab">
+                            {{ "%02d"|format(m.mes) }}/{{ m.ano }} - {{ meses_nome[m.mes] }}
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+                <div class="tab-content">
+                    {% for m in previsao.meses %}
+                    <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="sub-mes-{{ r.pessoa.id }}-{{ loop.index0 }}" role="tabpanel">
+                        {% set chave_mes = m.ano|string ~ '-' ~ ("%02d"|format(m.mes)) %}
+                        {% set contas_mes = contas_status_por_pessoa_mes.get(r.pessoa.id, {}).get(chave_mes, []) %}
+                        {% set descontos_mes = descontos_itens_por_pessoa_mes.get(r.pessoa.id, {}).get(chave_mes, []) %}
+                        <h6 style="margin: 0 0 0.5rem 0;">Receber pagamento</h6>
+                        {% if contas_mes %}
+                        {% set ns_mes = namespace(pendentes=0) %}
+                        <div class="table table-green">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Conta</th>
+                                        <th>Valor</th>
+                                        <th>Status</th>
+                                        <th>Ação</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for conta in contas_mes %}
+                                    {% if not conta.pago %}{% set ns_mes.pendentes = ns_mes.pendentes + 1 %}{% endif %}
+                                    <tr>
+                                        <td>{{ conta.descricao }}</td>
+                                        <td>R$ {{ "{:,.2f}".format(conta.valor) }}</td>
+                                        <td>
+                                            {% if conta.pago %}
+                                            <span class="btn btn-success btn-sm" style="cursor: default; opacity: 0.9;">Pago</span>
+                                            {% else %}
+                                            <span class="btn btn-secondary btn-sm" style="cursor: default; opacity: 0.9;">Pendente</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if not conta.pago %}
+                                            <form method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="registrar_pagamento_item">
+                                                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                                                <input type="hidden" name="conta_token" value="{{ conta.token }}">
+                                                <input type="hidden" name="mes_ref" value="{{ m.mes }}">
+                                                <input type="hidden" name="ano_ref" value="{{ m.ano }}">
+                                                <button type="submit" class="btn btn-success btn-sm" title="Pagar">&#10003;</button>
+                                            </form>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% if ns_mes.pendentes > 0 %}
+                        <form method="POST" style="margin: 0.55rem 0 0.85rem;">
+                            <input type="hidden" name="action" value="registrar_pagamento_todos">
+                            <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                            <input type="hidden" name="mes_ref" value="{{ m.mes }}">
+                            <input type="hidden" name="ano_ref" value="{{ m.ano }}">
+                            <button type="submit" class="btn btn-success">Marcar tudo como pago</button>
+                        </form>
+                        {% endif %}
+                        {% else %}
+                        <p style="margin-bottom: 0.85rem;">Nenhuma conta para este mês.</p>
+                        {% endif %}
+                        <h6 style="margin: 0 0 0.5rem 0;">Descontos</h6>
+                        <form method="POST" style="margin: 0.25rem 0 0.75rem;">
+                            <input type="hidden" name="action" value="adicionar_desconto">
+                            <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                            <input type="hidden" name="mes_ref" value="{{ m.mes }}">
+                            <input type="hidden" name="ano_ref" value="{{ m.ano }}">
+                            <div class="row form-row">
+                                <div class="col-3">
+                                    <div class="form-group">
+                                        <label>Descrição do desconto</label>
+                                        <input type="text" name="descricao_desconto" placeholder="Ex.: Acordo, cupom, abatimento">
+                                    </div>
+                                </div>
+                                <div class="col-2">
+                                    <div class="form-group">
+                                        <label>Desconto (R$)</label>
+                                        <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor_desconto">
+                                    </div>
+                                </div>
+                                <div class="col-2 form-action-col">
+                                    <button type="submit" class="btn btn-primary">Adicionar desconto</button>
+                                </div>
+                            </div>
+                        </form>
+                        {% if descontos_mes %}
+                        <div class="table table-blue" style="margin-bottom: 0.9rem;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Descrição</th>
+                                        <th>Valor</th>
+                                        <th>Ações</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for d in descontos_mes %}
+                                    <tr>
+                                        <td>{{ d.descricao }}</td>
+                                        <td>R$ {{ "{:,.2f}".format(d.valor) }}</td>
+                                        <td>
+                                            <button
+                                                type="button"
+                                                class="btn btn-warning btn-sm"
+                                                data-toggle="collapse"
+                                                data-target="#editar-desconto-{{ d.id }}"
+                                                aria-expanded="false"
+                                                aria-controls="editar-desconto-{{ d.id }}"
+                                                title="Editar">
+                                                &#9998;
+                                            </button>
+                                            <form method="POST" style="display:inline;">
+                                                <input type="hidden" name="action" value="excluir_desconto">
+                                                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                                                <input type="hidden" name="desconto_id" value="{{ d.id }}">
+                                                <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    <tr class="collapse" id="editar-desconto-{{ d.id }}">
+                                        <td colspan="3">
+                                            <form method="POST">
+                                                <input type="hidden" name="action" value="editar_desconto">
+                                                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                                                <input type="hidden" name="desconto_id" value="{{ d.id }}">
+                                                <div class="row form-row">
+                                                    <div class="col-4">
+                                                        <div class="form-group">
+                                                            <label>Descrição</label>
+                                                            <input type="text" name="descricao_desconto" value="{{ d.descricao }}" required>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-2">
+                                                        <div class="form-group">
+                                                            <label>Valor (R$)</label>
+                                                            <input
+                                                                type="text"
+                                                                class="money-input"
+                                                                inputmode="numeric"
+                                                                autocomplete="off"
+                                                                name="valor_desconto"
+                                                                value="{{ '%.2f'|format(d.valor) }}"
+                                                                required
+                                                            >
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-2 form-action-col">
+                                                        <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                                    </div>
+                                                </div>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
 
-                <div style="margin: 0.5rem 0;">
-                    <label style="font-weight: 600; margin: 0;">
-                        <input type="checkbox" onclick="toggleAllContas('{{ r.pessoa.id }}', this.checked)">
-                        Marcar tudo como pago
-                    </label>
+                    </div>
+                    {% endfor %}
                 </div>
-
-                <div class="table table-green">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Pagar</th>
-                                <th>Conta</th>
-                                <th>Valor</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for conta in contas %}
-                            <tr>
-                                <td>
-                                    {% if not conta.pago %}
-                                    <input
-                                        type="checkbox"
-                                        name="conta_paga"
-                                        value="{{ conta.token }}"
-                                        class="conta-paga-{{ r.pessoa.id }}"
-                                    >
-                                    {% endif %}
-                                </td>
-                                <td>{{ conta.descricao }}</td>
-                                <td>R$ {{ "{:,.2f}".format(conta.valor) }}</td>
-                                <td>
-                                    {% if conta.pago %}
-                                    <span class="btn btn-success btn-sm" style="cursor: default; opacity: 0.9;">Pago</span>
-                                    {% else %}
-                                    <span class="btn btn-secondary btn-sm" style="cursor: default; opacity: 0.9;">Pendente</span>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                <div style="margin-top: 0.75rem;">
-                    <button type="submit" class="btn btn-success">Registrar contas pagas</button>
-                </div>
-            </form>
-            {% else %}
-            <p>Nenhuma conta para esta pessoa no mês selecionado.</p>
-            {% endif %}
+                {% else %}
+                <p>Sem contas previstas.</p>
+                {% endif %}
+            </div>
         </section>
     </div>
     {% endif %}
@@ -223,12 +374,6 @@
     <small>Total pago: R$ {{ "{:,.2f}".format(total_pago_geral) }} | Saldo pendente: R$ {{ "{:,.2f}".format(saldo_pend_geral) }}</small>
 </div>
 
-<script>
-function toggleAllContas(pessoaId, checked) {
-    const checkboxes = document.querySelectorAll('.conta-paga-' + pessoaId);
-    checkboxes.forEach(cb => { cb.checked = checked; });
-}
-</script>
 {% endblock %}
 
 

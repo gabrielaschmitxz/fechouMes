@@ -87,13 +87,14 @@
                                     data-toggle="collapse"
                                     data-target="#editar-salario-{{ x.lancamento_id }}"
                                     aria-expanded="false"
-                                    aria-controls="editar-salario-{{ x.lancamento_id }}">
-                                    Editar
+                                    aria-controls="editar-salario-{{ x.lancamento_id }}"
+                                    title="Editar">
+                                    &#9998;
                                 </button>
                                 <form method="POST" style="display: inline;">
                                     <input type="hidden" name="action" value="excluir_lancamento">
                                     <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
-                                    <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                    <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
                                 </form>
                             </td>
                         </tr>
@@ -213,7 +214,7 @@
                 <tbody>
                     {% set ns = namespace(has_agendada=false) %}
                     {% for x in lancamentos_extras_tabela %}
-                    {% if x.status == 'Agendado' and x.categoria != 'salario' and x.data_ref and x.data_ref > hoje_iso %}
+                    {% if x.status == 'Agendado' and x.categoria != 'salario' %}
                     {% set ns.has_agendada = true %}
                     <tr>
                         <td>{{ x.descricao or x.extra_nome }}</td>
@@ -230,13 +231,14 @@
                                 data-toggle="collapse"
                                 data-target="#editar-agendada-{{ x.lancamento_id }}"
                                 aria-expanded="false"
-                                aria-controls="editar-agendada-{{ x.lancamento_id }}">
-                                Editar
+                                aria-controls="editar-agendada-{{ x.lancamento_id }}"
+                                title="Editar">
+                                &#9998;
                             </button>
                             <form method="POST" style="display: inline;">
                                 <input type="hidden" name="action" value="excluir_lancamento">
                                 <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
-                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
                             </form>
                         </td>
                     </tr>
@@ -315,7 +317,9 @@
                 <tbody>
                     {% set nsr = namespace(has_recebido=false) %}
                     {% for x in lancamentos_extras_tabela %}
-                    {% if x.status == 'Recebido' and x.categoria != 'salario' %}
+                    {% set desc_l = (x.descricao or '')|lower %}
+                    {% set ocultar_hist = ('abatimento de benefício:' in desc_l) or ('conta fixa paga:' in desc_l) %}
+                    {% if x.status == 'Recebido' and x.categoria != 'salario' and not ocultar_hist %}
                     {% set nsr.has_recebido = true %}
                     <tr>
                         <td>{{ x.descricao or x.extra_nome }}</td>
@@ -336,13 +340,14 @@
                                 data-toggle="collapse"
                                 data-target="#editar-recebida-{{ x.lancamento_id }}"
                                 aria-expanded="false"
-                                aria-controls="editar-recebida-{{ x.lancamento_id }}">
-                                Editar
+                                aria-controls="editar-recebida-{{ x.lancamento_id }}"
+                                title="Editar">
+                                &#9998;
                             </button>
                             <form method="POST" style="display: inline;">
                                 <input type="hidden" name="action" value="excluir_lancamento">
                                 <input type="hidden" name="lancamento_id" value="{{ x.lancamento_id }}">
-                                <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
                             </form>
                         </td>
                     </tr>
@@ -417,35 +422,70 @@
             {% endif %}
         {% endfor %}
         {% if ns_conta.has %}
+            {% set gastos_status = gastos_por_saldo.get(saldo.id, []) %}
+            {% set ns_gastos_pix = namespace(total=0.0, has=false) %}
+            {% for g in gastos_status %}
+                {% if g.tipo == 'gasto_pix' %}
+                    {% set ns_gastos_pix.total = ns_gastos_pix.total + g.valor %}
+                    {% set ns_gastos_pix.has = true %}
+                {% endif %}
+            {% endfor %}
+            {% set ns_gastos_conta = namespace(total=0.0, has=false) %}
+            {% for l in lancs_conta %}
+                {% if l.categoria in ['salario', 'extra', 'bonus'] and l.valor < 0 %}
+                    {% set ns_gastos_conta.total = ns_gastos_conta.total + (-l.valor) %}
+                    {% set ns_gastos_conta.has = true %}
+                {% endif %}
+            {% endfor %}
             <div class="metric-container" style="margin-bottom: 0.75rem;">
                 <div style="font-weight: 700; color: #1e3a8a; margin-bottom: 0.35rem;">
                     Conta: R$ {{ "{:,.2f}".format(ns_conta.total - pix_por_saldo.get(saldo.id, 0)) }}
                 </div>
-            </div>
-            {% for l in lancs_conta %}
-            {% if l.categoria in ['salario', 'extra', 'bonus'] %}
-            <div class="metric-container" style="margin-bottom: 0.75rem;">
-                <div style="font-weight: 700; color: #1e3a8a; margin-bottom: 0.35rem;">
-                    {% if l.categoria == 'salario' %}
-                    Salário R$ {{ "{:,.2f}".format(l.valor) }}
-                    {% else %}
-                    {{ l.categoria|capitalize }}{% if l.descricao %}: {{ l.descricao }}{% endif %}: R$ {{ "{:,.2f}".format(l.valor) }}
-                    {% endif %}
-                </div>
                 <div style="font-size: 0.92rem; color: #6b7280; margin-bottom: 0.25rem;">
-                    Data: {{ l.data_recebimento or l.created_at[:10] }}
+                    Gastos: R$ {{ "{:,.2f}".format(ns_gastos_conta.total + ns_gastos_pix.total) }}
                 </div>
-                <div style="font-size: 0.92rem; color: #6b7280;">
-                    Status:
-                    {% if l.tipo_origem == 'agendado' %}
-                        <span style="color:#ff6a00;font-weight:600;">Agendado</span>
-                    {% else %}
-                        <span style="color:#16a34a;font-weight:600;">Recebido</span>
-                    {% endif %}
+                {% if ns_gastos_conta.has or ns_gastos_pix.has %}
+                <div class="table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Gasto</th>
+                                <th>Valor</th>
+                                <th>Data</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for l in lancs_conta %}
+                            {% if l.categoria in ['salario', 'extra', 'bonus'] and l.valor < 0 %}
+                            <tr>
+                                <td>
+                                    {% if l.categoria == 'extra' and (l.descricao or '').startswith('Conta fixa paga:') %}
+                                        {{ l.descricao }}
+                                    {% else %}
+                                        {{ l.categoria|capitalize }}{% if l.descricao %}: {{ l.descricao }}{% endif %}
+                                    {% endif %}
+                                </td>
+                                <td>R$ {{ "{:,.2f}".format(-l.valor) }}</td>
+                                <td>{{ l.data_recebimento or l.created_at[:10] }}</td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                            {% for g in gastos_status %}
+                            {% if g.tipo == 'gasto_pix' %}
+                            <tr>
+                                <td>{{ g.descricao }}</td>
+                                <td>R$ {{ "{:,.2f}".format(g.valor) }}</td>
+                                <td>{{ "%02d"|format(g.mes_referencia) }}/{{ g.ano_referencia }}</td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
+                {% else %}
+                <div style="font-size: 0.92rem; color: #6b7280;">Sem gastos vinculados.</div>
+                {% endif %}
             </div>
-            {% endif %}
-            {% endfor %}
         {% else %}
             <p>Nenhum lançamento de conta para {{ saldo.nome }}.</p>
         {% endif %}

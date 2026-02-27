@@ -7,6 +7,11 @@ from finance_app.database import get_connection
 from finance_app.models import CartaoConfig, CartaoParcelada, CartaoAvista
 
 
+def _add_meses(mes: int, ano: int, delta: int) -> Tuple[int, int]:
+    idx = (ano * 12 + (mes - 1)) + delta
+    return (idx % 12) + 1, idx // 12
+
+
 def get_config() -> CartaoConfig:
     conn = get_connection()
     cur = conn.cursor()
@@ -214,6 +219,7 @@ def reabrir_fatura_atual() -> None:
 def listar_todos_lancamentos() -> List[Dict[str, object]]:
     conn = get_connection()
     cur = conn.cursor()
+    rows: List[Dict[str, object]] = []
     cur.execute(
         """
         SELECT
@@ -228,9 +234,14 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
             'Lançado' AS status,
             pessoa_id
         FROM cartao_avista
-        UNION ALL
+        ORDER BY ano_referencia DESC, mes_referencia DESC, id DESC;
+        """
+    )
+    rows.extend(dict(r) for r in cur.fetchall())
+
+    cur.execute(
+        """
         SELECT
-            'parcelado' AS tipo,
             id,
             descricao,
             valor_parcela AS valor,
@@ -241,12 +252,60 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
             status,
             pessoa_id
         FROM cartao_parceladas
-        ORDER BY ano_ref DESC, mes_ref DESC, id DESC;
+        ORDER BY ano_inicio DESC, mes_inicio DESC, id DESC;
         """
     )
-    rows = cur.fetchall()
+    for r in cur.fetchall():
+        item = dict(r)
+        item["tipo"] = "parcelado"
+        status = str(item.get("status") or "")
+        parcela_atual = int(item.get("parcela_atual") or 1)
+        total_parcelas = int(item.get("total_parcelas") or 1)
+        mes_inicio = int(item.get("mes_ref") or 1)
+        ano_inicio = int(item.get("ano_ref") or date.today().year)
+
+        if status == "Ativa" and parcela_atual <= total_parcelas:
+            for off in range(total_parcelas - parcela_atual + 1):
+                parcela_exibicao = parcela_atual + off
+                mes_ref, ano_ref = _add_meses(mes_inicio, ano_inicio, off)
+                rows.append(
+                    {
+                        "tipo": "parcelado",
+                        "id": int(item["id"]),
+                        "descricao": str(item["descricao"]),
+                        "valor": float(item["valor"]),
+                        "total_parcelas": total_parcelas,
+                        "parcela_atual": parcela_atual,
+                        "parcela_exibicao": parcela_exibicao,
+                        "mes_ref": mes_ref,
+                        "ano_ref": ano_ref,
+                        "mes_inicio": mes_inicio,
+                        "ano_inicio": ano_inicio,
+                        "status": status,
+                        "pessoa_id": item.get("pessoa_id"),
+                    }
+                )
+        else:
+            rows.append(
+                {
+                    "tipo": "parcelado",
+                    "id": int(item["id"]),
+                    "descricao": str(item["descricao"]),
+                    "valor": float(item["valor"]),
+                    "total_parcelas": total_parcelas,
+                    "parcela_atual": parcela_atual,
+                    "parcela_exibicao": parcela_atual,
+                    "mes_ref": mes_inicio,
+                    "ano_ref": ano_inicio,
+                    "mes_inicio": mes_inicio,
+                    "ano_inicio": ano_inicio,
+                    "status": status,
+                    "pessoa_id": item.get("pessoa_id"),
+                }
+            )
     conn.close()
-    return [dict(r) for r in rows]
+    rows.sort(key=lambda x: (-int(x["ano_ref"]), -int(x["mes_ref"]), -int(x["id"])))
+    return rows
 
 
 def excluir_avista(lancamento_id: int) -> bool:
@@ -299,7 +358,7 @@ def atualizar_parcelada(
     valor_parcela: float,
     parcela_atual: int,
     total_parcelas: int,
-    status: str,
+    status: str | None,
     pessoa_id: int | None,
     mes_inicio: int,
     ano_inicio: int,
@@ -309,7 +368,7 @@ def atualizar_parcelada(
     cur.execute(
         """
         UPDATE cartao_parceladas
-        SET descricao = ?, valor_parcela = ?, parcela_atual = ?, total_parcelas = ?, status = ?, pessoa_id = ?, mes_inicio = ?, ano_inicio = ?
+        SET descricao = ?, valor_parcela = ?, parcela_atual = ?, total_parcelas = ?, status = COALESCE(?, status), pessoa_id = ?, mes_inicio = ?, ano_inicio = ?
         WHERE id = ?;
         """,
         (

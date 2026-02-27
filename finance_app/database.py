@@ -157,6 +157,10 @@ def _init_db_sqlite(cur: CursorCompat) -> None:
             nome TEXT NOT NULL,
             categoria TEXT,
             valor_padrao REAL,
+            desconto_pessoa_nome TEXT,
+            desconto_origem TEXT,
+            desconto_receita_extra_id INTEGER,
+            desconto_aplicado INTEGER NOT NULL DEFAULT 0,
             vencimento_dia INTEGER,
             vencimento_data TEXT,
             mes_referencia INTEGER NOT NULL,
@@ -255,6 +259,32 @@ def _init_db_sqlite(cur: CursorCompat) -> None:
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS pessoas_descontos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pessoa_id INTEGER NOT NULL,
+            valor REAL NOT NULL DEFAULT 0,
+            mes_referencia INTEGER NOT NULL,
+            ano_referencia INTEGER NOT NULL,
+            UNIQUE (pessoa_id, mes_referencia, ano_referencia),
+            FOREIGN KEY (pessoa_id) REFERENCES pessoas (id)
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pessoas_descontos_itens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pessoa_id INTEGER NOT NULL,
+            descricao TEXT NOT NULL,
+            valor REAL NOT NULL DEFAULT 0,
+            mes_referencia INTEGER NOT NULL,
+            ano_referencia INTEGER NOT NULL,
+            FOREIGN KEY (pessoa_id) REFERENCES pessoas (id)
+        );
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
@@ -269,11 +299,17 @@ def _init_db_sqlite(cur: CursorCompat) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_contas_mes_ano ON contas_fixas (mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_contas_nome_ref ON contas_fixas (nome, ano_referencia, mes_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_avista_ref ON cartao_avista (mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_avista_pessoa_ref ON cartao_avista (pessoa_id, ano_referencia, mes_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_parceladas_status ON cartao_parceladas (status);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_parceladas_pessoa_status ON cartao_parceladas (pessoa_id, status);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_gastos_ref ON gastos_pix (mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_gastos_pessoa_ref ON gastos_pix (pessoa_id, mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_pag_terc_pessoa_ref ON pagamentos_terceiros (pessoa_id, mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_pag_itens_pessoa_ref ON pagamentos_terceiros_itens (pessoa_id, mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pag_itens_tipo_item_ref ON pagamentos_terceiros_itens (tipo, item_id, pessoa_id, mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_contas_desconto_nome ON contas_fixas (desconto_pessoa_nome);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_ref ON pessoas_descontos (pessoa_id, mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_itens_ref ON pessoas_descontos_itens (pessoa_id, mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_receitas_lanc_saldo ON receitas_lancamentos (saldo_id);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_receitas_lanc_extra ON receitas_lancamentos (receita_extra_id);")
 
@@ -332,6 +368,10 @@ def _init_db_postgres(cur: CursorCompat) -> None:
             nome TEXT NOT NULL,
             categoria TEXT,
             valor_padrao NUMERIC(14,2),
+            desconto_pessoa_nome TEXT,
+            desconto_origem TEXT,
+            desconto_receita_extra_id BIGINT,
+            desconto_aplicado BOOLEAN NOT NULL DEFAULT FALSE,
             vencimento_dia INTEGER,
             vencimento_data DATE,
             mes_referencia INTEGER NOT NULL,
@@ -423,6 +463,30 @@ def _init_db_postgres(cur: CursorCompat) -> None:
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS pessoas_descontos (
+            id BIGSERIAL PRIMARY KEY,
+            pessoa_id BIGINT NOT NULL REFERENCES pessoas (id),
+            valor NUMERIC(14,2) NOT NULL DEFAULT 0,
+            mes_referencia INTEGER NOT NULL,
+            ano_referencia INTEGER NOT NULL,
+            UNIQUE (pessoa_id, mes_referencia, ano_referencia)
+        );
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pessoas_descontos_itens (
+            id BIGSERIAL PRIMARY KEY,
+            pessoa_id BIGINT NOT NULL REFERENCES pessoas (id),
+            descricao TEXT NOT NULL,
+            valor NUMERIC(14,2) NOT NULL DEFAULT 0,
+            mes_referencia INTEGER NOT NULL,
+            ano_referencia INTEGER NOT NULL
+        );
+        """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS usuarios (
             id BIGSERIAL PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
@@ -437,13 +501,105 @@ def _init_db_postgres(cur: CursorCompat) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_contas_mes_ano ON contas_fixas (mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_contas_nome_ref ON contas_fixas (nome, ano_referencia, mes_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_avista_ref ON cartao_avista (mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_avista_pessoa_ref ON cartao_avista (pessoa_id, ano_referencia, mes_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_parceladas_status ON cartao_parceladas (status);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_cartao_parceladas_pessoa_status ON cartao_parceladas (pessoa_id, status);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_gastos_ref ON gastos_pix (mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_gastos_pessoa_ref ON gastos_pix (pessoa_id, mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_pag_terc_pessoa_ref ON pagamentos_terceiros (pessoa_id, mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_pag_itens_pessoa_ref ON pagamentos_terceiros_itens (pessoa_id, mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pag_itens_tipo_item_ref ON pagamentos_terceiros_itens (tipo, item_id, pessoa_id, mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_contas_desconto_nome ON contas_fixas (desconto_pessoa_nome);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_ref ON pessoas_descontos (pessoa_id, mes_referencia, ano_referencia);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_itens_ref ON pessoas_descontos_itens (pessoa_id, mes_referencia, ano_referencia);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_receitas_lanc_saldo ON receitas_lancamentos (saldo_id);")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_receitas_lanc_extra ON receitas_lancamentos (receita_extra_id);")
+
+
+def _apply_migrations(cur: CursorCompat) -> None:
+    if USE_POSTGRES:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'contas_fixas';
+            """
+        )
+        cols = {str(r["column_name"]) for r in cur.fetchall()}
+        if "desconto_pessoa_nome" not in cols:
+            cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_pessoa_nome TEXT;")
+        if "desconto_origem" not in cols:
+            cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_origem TEXT;")
+        if "desconto_receita_extra_id" not in cols:
+            cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_receita_extra_id BIGINT;")
+        if "desconto_aplicado" not in cols:
+            cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_aplicado BOOLEAN NOT NULL DEFAULT FALSE;")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pessoas_descontos (
+                id BIGSERIAL PRIMARY KEY,
+                pessoa_id BIGINT NOT NULL REFERENCES pessoas (id),
+                valor NUMERIC(14,2) NOT NULL DEFAULT 0,
+                mes_referencia INTEGER NOT NULL,
+                ano_referencia INTEGER NOT NULL,
+                UNIQUE (pessoa_id, mes_referencia, ano_referencia)
+            );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_ref ON pessoas_descontos (pessoa_id, mes_referencia, ano_referencia);")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pessoas_descontos_itens (
+                id BIGSERIAL PRIMARY KEY,
+                pessoa_id BIGINT NOT NULL REFERENCES pessoas (id),
+                descricao TEXT NOT NULL,
+                valor NUMERIC(14,2) NOT NULL DEFAULT 0,
+                mes_referencia INTEGER NOT NULL,
+                ano_referencia INTEGER NOT NULL
+            );
+            """
+        )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_itens_ref ON pessoas_descontos_itens (pessoa_id, mes_referencia, ano_referencia);")
+        return
+
+    cur.execute("PRAGMA table_info(contas_fixas);")
+    cols = {str(r["name"]) for r in cur.fetchall()}
+    if "desconto_pessoa_nome" not in cols:
+        cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_pessoa_nome TEXT;")
+    if "desconto_origem" not in cols:
+        cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_origem TEXT;")
+    if "desconto_receita_extra_id" not in cols:
+        cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_receita_extra_id INTEGER;")
+    if "desconto_aplicado" not in cols:
+        cur.execute("ALTER TABLE contas_fixas ADD COLUMN desconto_aplicado INTEGER NOT NULL DEFAULT 0;")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pessoas_descontos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pessoa_id INTEGER NOT NULL,
+            valor REAL NOT NULL DEFAULT 0,
+            mes_referencia INTEGER NOT NULL,
+            ano_referencia INTEGER NOT NULL,
+            UNIQUE (pessoa_id, mes_referencia, ano_referencia),
+            FOREIGN KEY (pessoa_id) REFERENCES pessoas (id)
+        );
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_ref ON pessoas_descontos (pessoa_id, mes_referencia, ano_referencia);")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pessoas_descontos_itens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pessoa_id INTEGER NOT NULL,
+            descricao TEXT NOT NULL,
+            valor REAL NOT NULL DEFAULT 0,
+            mes_referencia INTEGER NOT NULL,
+            ano_referencia INTEGER NOT NULL,
+            FOREIGN KEY (pessoa_id) REFERENCES pessoas (id)
+        );
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_pessoas_desc_itens_ref ON pessoas_descontos_itens (pessoa_id, mes_referencia, ano_referencia);")
 
 
 def init_db() -> None:
@@ -454,6 +610,7 @@ def init_db() -> None:
             _init_db_postgres(cur)
         else:
             _init_db_sqlite(cur)
+        _apply_migrations(cur)
         conn.commit()
     finally:
         conn.close()

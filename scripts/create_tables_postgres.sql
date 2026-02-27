@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS contas_fixas (
     nome TEXT NOT NULL,
     categoria TEXT,
     valor_padrao NUMERIC(14, 2),
+    desconto_pessoa_nome TEXT,
+    desconto_origem TEXT,
+    desconto_receita_extra_id BIGINT REFERENCES receitas_extras (id),
+    desconto_aplicado BOOLEAN NOT NULL DEFAULT FALSE,
     vencimento_dia INTEGER,
     vencimento_data DATE,
     mes_referencia INTEGER NOT NULL,
@@ -115,6 +119,24 @@ CREATE TABLE IF NOT EXISTS pagamentos_terceiros_itens (
     mes_referencia INTEGER NOT NULL,
     ano_referencia INTEGER NOT NULL,
     UNIQUE (pessoa_id, tipo, item_id, mes_referencia, ano_referencia)
+);
+
+CREATE TABLE IF NOT EXISTS pessoas_descontos (
+    id BIGSERIAL PRIMARY KEY,
+    pessoa_id BIGINT NOT NULL REFERENCES pessoas (id),
+    valor NUMERIC(14, 2) NOT NULL DEFAULT 0,
+    mes_referencia INTEGER NOT NULL,
+    ano_referencia INTEGER NOT NULL,
+    UNIQUE (pessoa_id, mes_referencia, ano_referencia)
+);
+
+CREATE TABLE IF NOT EXISTS pessoas_descontos_itens (
+    id BIGSERIAL PRIMARY KEY,
+    pessoa_id BIGINT NOT NULL REFERENCES pessoas (id),
+    descricao TEXT NOT NULL,
+    valor NUMERIC(14, 2) NOT NULL DEFAULT 0,
+    mes_referencia INTEGER NOT NULL,
+    ano_referencia INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS usuarios (

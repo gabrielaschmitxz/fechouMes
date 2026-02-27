@@ -36,6 +36,10 @@ class ContaFixa:
     nome: str
     categoria: Optional[str]
     valor_padrao: Optional[float]
+    desconto_pessoa_nome: Optional[str]
+    desconto_origem: Optional[str]
+    desconto_receita_extra_id: Optional[int]
+    desconto_aplicado: bool
     vencimento_dia: Optional[int]
     vencimento_data: Optional[str]
     mes_referencia: int

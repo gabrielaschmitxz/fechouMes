@@ -202,7 +202,6 @@
                             <th>Descrição</th>
                             <th>Valor</th>
                             <th>Parcelas</th>
-                            <th>Status</th>
                             <th>Pessoa</th>
                             <th>Competência</th>
                             <th>Ações</th>
@@ -215,29 +214,31 @@
                             <td>{{ l.descricao }}</td>
                             <td>R$ {{ "{:,.2f}".format(l.valor) }}</td>
                             <td>{{ l.parcelas_label }}</td>
-                            <td>{{ l.status }}</td>
                             <td>{{ l.pessoa_nome }}</td>
                             <td>{{ l.periodo }}</td>
                             <td>
+                                <div class="acoes-inline">
                                 <button
                                     type="button"
                                     class="btn btn-warning btn-sm"
                                     data-toggle="collapse"
-                                    data-target="#editar-cartao-{{ l.tipo }}-{{ l.id }}"
+                                    data-target="#editar-cartao-{{ l.ui_key }}"
                                     aria-expanded="false"
-                                    aria-controls="editar-cartao-{{ l.tipo }}-{{ l.id }}">
-                                    Editar
+                                    aria-controls="editar-cartao-{{ l.ui_key }}"
+                                    title="Editar">
+                                    &#9998;
                                 </button>
                                 <form method="POST" style="display:inline;">
                                     <input type="hidden" name="action" value="excluir_lancamento">
                                     <input type="hidden" name="tipo" value="{{ l.tipo }}">
                                     <input type="hidden" name="lancamento_id" value="{{ l.id }}">
-                                    <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                                    <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
                                 </form>
+                                </div>
                             </td>
                         </tr>
-                        <tr class="collapse" id="editar-cartao-{{ l.tipo }}-{{ l.id }}">
-                            <td colspan="8">
+                        <tr class="collapse" id="editar-cartao-{{ l.ui_key }}">
+                            <td colspan="7">
                                 <form method="POST">
                                     <input type="hidden" name="action" value="editar_lancamento">
                                     <input type="hidden" name="tipo" value="{{ l.tipo }}">
@@ -271,7 +272,7 @@
                                                 <label>Competência (mês)</label>
                                                 <select name="mes_competencia" required>
                                                     {% for m in range(1, 13) %}
-                                                        <option value="{{ m }}" {% if m == l.mes_ref %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                                                        <option value="{{ m }}" {% if m == (l.mes_inicio if l.tipo == 'parcelado' else l.mes_ref) %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
                                                     {% endfor %}
                                                 </select>
                                             </div>
@@ -281,7 +282,7 @@
                                                 <label>Ano</label>
                                                 <select name="ano_competencia" required>
                                                     {% for a in anos_competencia %}
-                                                        <option value="{{ a }}" {% if a == l.ano_ref %}selected{% endif %}>{{ a }}</option>
+                                                        <option value="{{ a }}" {% if a == (l.ano_inicio if l.tipo == 'parcelado' else l.ano_ref) %}selected{% endif %}>{{ a }}</option>
                                                     {% endfor %}
                                                 </select>
                                             </div>
@@ -297,15 +298,6 @@
                                             <div class="form-group">
                                                 <label>Total</label>
                                                 <input type="number" name="total_parcelas" min="1" value="{{ l.total_parcelas }}" required>
-                                            </div>
-                                        </div>
-                                        <div class="col-2">
-                                            <div class="form-group">
-                                                <label>Status</label>
-                                                <select name="status">
-                                                    <option value="Ativa" {% if l.status == 'Ativa' %}selected{% endif %}>Ativa</option>
-                                                    <option value="Finalizada" {% if l.status == 'Finalizada' %}selected{% endif %}>Finalizada</option>
-                                                </select>
                                             </div>
                                         </div>
                                         {% endif %}

@@ -9,7 +9,7 @@ from pathlib import Path
 # Adiciona o diretÃ³rio raiz ao path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from finance_app.database import setup_database
+from finance_app.database import setup_database, get_connection
 from finance_app.services import (
     receita_service,
     cartao_service,
@@ -172,7 +172,7 @@ def dashboard():
     receita_service.garantir_saldos_por_nomes(nomes_padrao)
     resumo_receitas_padrao, _ = receita_service.calcular_resumo_receitas_padrao(nomes_padrao)
     saldos_beneficios_por_pessoa = receita_service.calcular_saldos_beneficios_por_pessoa(nomes_padrao)
-    gastos_pix_por_pessoa = gastos_service.calcular_totais_gastos_pix_por_pessoa(mes, ano)
+    gastos_pix_por_pessoa = gastos_service.calcular_totais_gastos_pix_por_pessoa_competencia(mes, ano)
     pessoa_id_por_nome = {p.nome.strip(): p.id for p in pessoas_ativas if p.nome.strip()}
     pix_por_nome_padrao = {
         nome: float(gastos_pix_por_pessoa.get(pessoa_id_por_nome.get(nome, -1), 0.0))
@@ -180,7 +180,7 @@ def dashboard():
     }
     total_geral = sum(float(x["saldo_conta"]) for x in resumo_receitas_padrao)
     fatura_info = cartao_service.calcular_fatura_atual()
-    totais_pix = gastos_service.calcular_totais_gastos_pix(mes, ano)
+    totais_pix = gastos_service.calcular_totais_gastos_pix_competencia(mes, ano)
     totais_contas = contas_service.calcular_totais_contas_fixas(mes, ano)
     total_mes_terc, total_pago_terc, saldo_pend_terc = pessoas_service.calcular_totais_gerais_terceiros(mes, ano)
     
@@ -216,6 +216,9 @@ def receitas():
     pessoas_ativas = pessoas_service.listar_pessoas(only_ativas=True)
     nomes_padrao_lista = [p.nome.strip() for p in pessoas_ativas if p.padrao and p.nome.strip()]
     receita_service.garantir_saldos_por_nomes(nomes_padrao_lista)
+    qtd_agendadas_processadas = receita_service.processar_receitas_agendadas_vencidas()
+    if qtd_agendadas_processadas > 0:
+        flash(f'{qtd_agendadas_processadas} receita(s) agendada(s) foram creditadas hoje.', 'info')
 
     saldos = receita_service.listar_saldos()
     extras = receita_service.listar_receitas_extras()
@@ -314,7 +317,7 @@ def receitas():
 
             saldo = receita_service.obter_saldo_por_nome(pessoa_saldo)
             if saldo:
-                if categoria == 'beneficio' and data_ref and data_ref > date.today():
+                if data_ref and data_ref > date.today():
                     receita_service.registrar_receita_agendada(
                         saldo.id,
                         categoria,
@@ -323,7 +326,7 @@ def receitas():
                         data_ref.isoformat(),
                         extra_ref.id if extra_ref else None,
                     )
-                    flash('Benefício agendado para recebimento futuro (não somado no saldo ainda).', 'info')
+                    flash('Receita agendada para recebimento futuro (não somada no saldo ainda).', 'info')
                 else:
                     receita_service.registrar_extra_recebido(
                         saldo.id,
@@ -599,11 +602,12 @@ def cartao():
             elif tipo == 'parcelado':
                 total_parcelas = int(request.form.get('total_parcelas', 1))
                 parcela_atual = int(request.form.get('parcela_atual', 1))
-                status = (request.form.get('status') or 'Ativa').strip().capitalize()
+                status_raw = request.form.get('status')
+                status = status_raw.strip().capitalize() if status_raw else None
                 if total_parcelas < 1 or parcela_atual < 1 or parcela_atual > total_parcelas:
                     flash('Parcela atual deve estar entre 1 e o total de parcelas.', 'warning')
                     return redirect(url_for('cartao'))
-                if status not in {'Ativa', 'Finalizada'}:
+                if status is not None and status not in {'Ativa', 'Finalizada'}:
                     flash('Status inválido.', 'warning')
                     return redirect(url_for('cartao'))
                 ok = cartao_service.atualizar_parcelada(
@@ -640,22 +644,30 @@ def cartao():
         ano_ref = int(l["ano_ref"])
         l["periodo"] = f'{mes_ref:02d}/{ano_ref} - {_MESES_NOMES[mes_ref]}'
         if l["tipo"] == "parcelado":
-            l["parcelas_label"] = f'{int(l["parcela_atual"])}/{int(l["total_parcelas"])}'
+            parcela_exibicao = int(l.get("parcela_exibicao", l["parcela_atual"]))
+            l["parcelas_label"] = f'{parcela_exibicao}/{int(l["total_parcelas"])}'
         else:
             l["parcelas_label"] = "-"
-    lancamentos_por_competencia = []
-    grupo_atual = None
+    for idx, l in enumerate(lancamentos_todos):
+        l["ui_key"] = f"{l['tipo']}-{int(l['id'])}-{idx}"
+    grupos_por_chave = {}
     for l in lancamentos_todos:
         chave = (int(l["ano_ref"]), int(l["mes_ref"]))
-        if grupo_atual is None or grupo_atual["chave"] != chave:
+        grupo = grupos_por_chave.get(chave)
+        if grupo is None:
             ano_ref, mes_ref = chave
-            grupo_atual = {
+            grupo = {
                 "chave": chave,
                 "titulo": f'{mes_ref:02d}/{ano_ref} - {_MESES_NOMES[mes_ref]}',
                 "lancamentos": [],
             }
-            lancamentos_por_competencia.append(grupo_atual)
-        grupo_atual["lancamentos"].append(l)
+            grupos_por_chave[chave] = grupo
+        grupo["lancamentos"].append(l)
+
+    lancamentos_por_competencia = [
+        grupos_por_chave[chave]
+        for chave in sorted(grupos_por_chave.keys(), key=lambda x: (x[0], x[1]))
+    ]
     
     return render_template(
         'cartao.html',
@@ -757,6 +769,39 @@ def contas_fixas():
     """PÃ¡gina de contas fixas"""
     mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
     ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
+
+    # Reconcilia contas já pagas com desconto configurado, mas ainda não aplicado.
+    reconciliadas = 0
+    for conta_paga in contas_service.listar_contas_pagas_com_desconto_pendente():
+        valor = abs(float(conta_paga.valor_padrao or 0))
+        if valor <= 0:
+            continue
+        if conta_paga.desconto_origem == 'beneficio':
+            if not conta_paga.desconto_receita_extra_id:
+                continue
+            ok_abat = receita_service.registrar_abatimento_beneficio(
+                conta_paga.desconto_pessoa_nome or "",
+                int(conta_paga.desconto_receita_extra_id),
+                valor,
+                conta_paga.nome,
+            )
+            if ok_abat:
+                contas_service.marcar_desconto_como_aplicado(conta_paga.id)
+                reconciliadas += 1
+        else:
+            saldo = receita_service.obter_saldo_por_nome(conta_paga.desconto_pessoa_nome or "")
+            if not saldo:
+                continue
+            receita_service.registrar_extra_recebido(
+                saldo.id,
+                -valor,
+                descricao=f"Conta fixa paga: {conta_paga.nome}",
+                categoria='extra',
+            )
+            contas_service.marcar_desconto_como_aplicado(conta_paga.id)
+            reconciliadas += 1
+    if reconciliadas > 0 and request.method == 'GET':
+        flash(f'{reconciliadas} desconto(s) de contas fixas foram reconciliados.', 'info')
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -766,17 +811,37 @@ def contas_fixas():
             categoria = (request.form.get('categoria') or '').strip() or None
             valor_str = request.form.get('valor')
             valor = _parse_brl_value(valor_str, None) if valor_str else None
+            mes_comp = request.form.get('mes_competencia', type=int, default=mes)
+            ano_comp = request.form.get('ano_competencia', type=int, default=ano)
+            desconto_pessoa_nome = (request.form.get('desconto_pessoa_nome') or '').strip() or None
+            desconto_origem = (request.form.get('desconto_origem') or '').strip() or None
+            desconto_receita_extra_id_str = (request.form.get('desconto_receita_extra_id') or '').strip()
+            desconto_receita_extra_id = int(desconto_receita_extra_id_str) if desconto_receita_extra_id_str else None
             vencimento_data = (request.form.get('vencimento_data') or '').strip() or None
             data_fim_str = (request.form.get('data_fim') or '').strip() or None
             
             if not nome:
                 flash('Informe o nome da conta.', 'warning')
+            elif desconto_origem and not desconto_pessoa_nome:
+                flash('Selecione a pessoa para desconto.', 'warning')
+            elif desconto_origem == 'beneficio' and not desconto_receita_extra_id:
+                flash('Selecione o benefício para abatimento.', 'warning')
             else:
                 contas_service.criar_conta_fixa(
-                    nome, categoria, valor, vencimento_data, None, mes, ano, data_fim_str
+                    nome,
+                    categoria,
+                    valor,
+                    desconto_pessoa_nome,
+                    desconto_origem,
+                    desconto_receita_extra_id,
+                    vencimento_data,
+                    None,
+                    mes_comp,
+                    ano_comp,
+                    data_fim_str,
                 )
                 flash('Conta fixa cadastrada.', 'success')
-            return redirect(url_for('contas_fixas', mes=mes, ano=ano))
+            return redirect(url_for('contas_fixas', mes=mes_comp, ano=ano_comp))
 
 
         elif action == 'editar_conta':
@@ -785,20 +850,40 @@ def contas_fixas():
             categoria = (request.form.get('categoria') or '').strip() or None
             valor_str = (request.form.get('valor') or '').strip()
             valor = _parse_brl_value(valor_str, None) if valor_str else None
+            desconto_pessoa_nome = (request.form.get('desconto_pessoa_nome') or '').strip() or None
+            desconto_origem = (request.form.get('desconto_origem') or '').strip() or None
+            desconto_receita_extra_id_str = (request.form.get('desconto_receita_extra_id') or '').strip()
+            desconto_receita_extra_id = int(desconto_receita_extra_id_str) if desconto_receita_extra_id_str else None
             vencimento_data = (request.form.get('vencimento_data') or '').strip() or None
             data_fim = (request.form.get('data_fim') or '').strip() or None
+            mes_comp = request.form.get('mes_competencia', type=int, default=mes)
+            ano_comp = request.form.get('ano_competencia', type=int, default=ano)
 
             if conta_id <= 0 or not nome:
                 flash('Dados inválidos para editar conta.', 'warning')
+            elif desconto_origem and not desconto_pessoa_nome:
+                flash('Selecione a pessoa para desconto.', 'warning')
+            elif desconto_origem == 'beneficio' and not desconto_receita_extra_id:
+                flash('Selecione o benefício para abatimento.', 'warning')
             else:
                 ok = contas_service.atualizar_conta_fixa(
-                    conta_id, nome, categoria, valor, vencimento_data, data_fim
+                    conta_id,
+                    nome,
+                    categoria,
+                    valor,
+                    desconto_pessoa_nome,
+                    desconto_origem,
+                    desconto_receita_extra_id,
+                    vencimento_data,
+                    data_fim,
+                    mes_comp,
+                    ano_comp,
                 )
                 if ok:
                     flash('Conta atualizada com sucesso.', 'success')
                 else:
                     flash('Conta não encontrada.', 'warning')
-            return redirect(url_for('contas_fixas', mes=mes, ano=ano))
+            return redirect(url_for('contas_fixas', mes=mes_comp, ano=ano_comp))
 
         elif action == 'excluir_conta':
             conta_id = int(request.form.get('conta_id', 0))
@@ -809,8 +894,43 @@ def contas_fixas():
             return redirect(url_for('contas_fixas', mes=mes, ano=ano))
         
         elif action == 'marcar_pago':
-            conta_id = int(request.form.get('conta_id'))
-            contas_service.marcar_conta_como_paga(conta_id)
+            conta_id = int(request.form.get('conta_id', 0))
+            conta = contas_service.obter_conta_fixa_por_id(conta_id)
+            if not conta:
+                flash('Conta não encontrada.', 'warning')
+                return redirect(url_for('contas_fixas', mes=mes, ano=ano))
+
+            foi_atualizada = contas_service.marcar_conta_como_paga(conta_id)
+            if foi_atualizada and not conta.desconto_aplicado and conta.desconto_pessoa_nome and (conta.valor_padrao or 0) > 0:
+                if conta.desconto_origem == 'beneficio':
+                    if not conta.desconto_receita_extra_id:
+                        flash('Conta marcada como paga, mas o benefício não está configurado para abatimento.', 'warning')
+                    else:
+                        ok_abat = receita_service.registrar_abatimento_beneficio(
+                            conta.desconto_pessoa_nome,
+                            int(conta.desconto_receita_extra_id),
+                            abs(float(conta.valor_padrao or 0)),
+                            conta.nome,
+                        )
+                        if not ok_abat:
+                            flash('Conta marcada como paga, mas não foi possível abater o benefício selecionado.', 'warning')
+                        else:
+                            contas_service.marcar_desconto_como_aplicado(conta_id)
+                else:
+                    saldo = receita_service.obter_saldo_por_nome(conta.desconto_pessoa_nome)
+                    if not saldo:
+                        flash(f"Conta marcada como paga, mas o saldo '{conta.desconto_pessoa_nome}' não foi encontrado para abatimento.", 'warning')
+                    else:
+                        receita_service.registrar_extra_recebido(
+                            saldo.id,
+                            -abs(float(conta.valor_padrao or 0)),
+                            descricao=f"Conta fixa paga: {conta.nome}",
+                            categoria='extra',
+                        )
+                        contas_service.marcar_desconto_como_aplicado(conta_id)
+            elif foi_atualizada and conta.desconto_origem and not conta.desconto_pessoa_nome:
+                flash('Conta marcada como paga, mas sem pessoa configurada para desconto.', 'warning')
+
             flash('Conta marcada como paga com sucesso.', 'success')
             return redirect(url_for('contas_fixas', mes=mes, ano=ano))
     
@@ -818,19 +938,32 @@ def contas_fixas():
     contas_service.gerar_contas_fixas_mes_atual()
     contas = contas_service.listar_contas_fixas(mes, ano)
     totais = contas_service.calcular_totais_contas_fixas(mes, ano)
+    saldos = receita_service.listar_saldos()
+    beneficios = [e for e in receita_service.listar_receitas_extras() if e.categoria == 'beneficio']
+    pessoas_todas = pessoas_service.listar_pessoas(only_ativas=False)
+    nomes_pessoas = sorted({p.nome.strip() for p in pessoas_todas if p.nome and p.nome.strip()})
+    for s in saldos:
+        nome = s.nome.strip()
+        if nome and nome not in nomes_pessoas:
+            nomes_pessoas.append(nome)
+    nomes_pessoas = sorted(set(nomes_pessoas), key=lambda x: x.lower())
     
     return render_template('contas_fixas.html', 
-        mes=mes, ano=ano, contas=contas, totais=totais)
+        mes=mes, ano=ano, contas=contas, totais=totais, saldos=saldos, beneficios=beneficios, nomes_pessoas=nomes_pessoas)
 
 
 @app.route('/pessoas', methods=['GET', 'POST'])
 def pessoas():
     """PÃ¡gina de pessoas (terceiros)"""
-    mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
-    ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
+    mes_atual, ano_atual = _mes_ano_atual()
+    mes_raw = request.args.get('mes')
+    ano_raw = request.args.get('ano')
+    mes = int(mes_raw) if mes_raw and str(mes_raw).isdigit() else mes_atual
+    ano = int(ano_raw) if ano_raw and str(ano_raw).isdigit() else ano_atual
+    competencia_informada = (mes_raw is not None) or (ano_raw is not None)
     mes_cartao_alt = None
     ano_cartao_alt = None
-    if request.args.get('mes') is None and request.args.get('ano') is None:
+    if (mes, ano) == (mes_atual, ano_atual):
         try:
             mes_cartao, ano_cartao = cartao_service.mes_ano_fatura_atual()
             if (mes_cartao, ano_cartao) != (mes, ano):
@@ -839,6 +972,11 @@ def pessoas():
         except Exception:
             mes_cartao_alt = None
             ano_cartao_alt = None
+
+    # Se o usuário não escolheu mês/ano manualmente, usa a competência real de pagamento.
+    if not competencia_informada and mes_cartao_alt is not None and ano_cartao_alt is not None:
+        mes = mes_cartao_alt
+        ano = ano_cartao_alt
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -895,43 +1033,218 @@ def pessoas():
         elif action == 'registrar_pagamento_itens':
             pessoa_id = int(request.form.get('pessoa_id'))
             itens_tokens = request.form.getlist('conta_paga')
+            mes_ref = request.form.get('mes_ref', type=int, default=mes)
+            ano_ref = request.form.get('ano_ref', type=int, default=ano)
 
             total = pessoas_service.registrar_pagamento_terceiro_por_itens(
-                pessoa_id, itens_tokens, mes, ano, mes_cartao_alt, ano_cartao_alt
+                pessoa_id, itens_tokens, mes_ref, ano_ref, mes_cartao_alt, ano_cartao_alt
             )
             if total > 0:
                 flash(f'Pagamento registrado: R$ {total:,.2f}.', 'success')
             else:
                 flash('Selecione ao menos uma conta pendente.', 'warning')
             return redirect(url_for('pessoas', mes=mes, ano=ano))
+
+        elif action == 'registrar_pagamento_item':
+            pessoa_id = int(request.form.get('pessoa_id', 0))
+            conta_token = (request.form.get('conta_token') or '').strip()
+            mes_ref = request.form.get('mes_ref', type=int, default=mes)
+            ano_ref = request.form.get('ano_ref', type=int, default=ano)
+            if pessoa_id <= 0 or not conta_token:
+                flash('Dados inválidos para pagamento.', 'warning')
+                return redirect(url_for('pessoas', mes=mes, ano=ano))
+            total = pessoas_service.registrar_pagamento_terceiro_por_itens(
+                pessoa_id, [conta_token], mes_ref, ano_ref, mes_cartao_alt, ano_cartao_alt
+            )
+            if total > 0:
+                flash(f'Pagamento registrado: R$ {total:,.2f}.', 'success')
+            else:
+                flash('Esta conta já está paga ou não foi encontrada.', 'warning')
+            return redirect(url_for('pessoas', mes=mes, ano=ano))
+
+        elif action == 'registrar_pagamento_todos':
+            pessoa_id = int(request.form.get('pessoa_id', 0))
+            mes_ref = request.form.get('mes_ref', type=int, default=mes)
+            ano_ref = request.form.get('ano_ref', type=int, default=ano)
+            if pessoa_id <= 0:
+                flash('Pessoa inválida para pagamento.', 'warning')
+                return redirect(url_for('pessoas', mes=mes, ano=ano))
+            contas = pessoas_service.listar_contas_status_pessoa(
+                pessoa_id, mes_ref, ano_ref, mes_cartao_alt, ano_cartao_alt
+            )
+            itens_tokens = [str(c["token"]) for c in contas if not bool(c.get("pago"))]
+            total = pessoas_service.registrar_pagamento_terceiro_por_itens(
+                pessoa_id, itens_tokens, mes_ref, ano_ref, mes_cartao_alt, ano_cartao_alt
+            )
+            if total > 0:
+                flash(f'Todas as contas pendentes foram marcadas como pagas: R$ {total:,.2f}.', 'success')
+            else:
+                flash('Não há contas pendentes para essa pessoa.', 'info')
+            return redirect(url_for('pessoas', mes=mes, ano=ano))
+
+        elif action == 'adicionar_desconto':
+            pessoa_id = int(request.form.get('pessoa_id', 0))
+            mes_ref = request.form.get('mes_ref', type=int, default=mes)
+            ano_ref = request.form.get('ano_ref', type=int, default=ano)
+            pessoa = pessoas_service.get_pessoa_by_id(pessoa_id)
+            if not pessoa:
+                flash('Pessoa não encontrada.', 'warning')
+                return redirect(url_for('pessoas', mes=mes, ano=ano))
+
+            descricao_desconto = (request.form.get('descricao_desconto') or '').strip()
+            valor_desconto = _parse_brl_value(request.form.get('valor_desconto'), 0.0)
+            if not descricao_desconto:
+                flash('Informe a descrição do desconto.', 'warning')
+            elif valor_desconto <= 0:
+                flash('Informe um valor de desconto maior que zero.', 'warning')
+            else:
+                pessoas_service.adicionar_desconto_manual_pessoa(
+                    pessoa_id, descricao_desconto, float(valor_desconto), mes_ref, ano_ref
+                )
+                flash('Desconto adicionado com sucesso.', 'success')
+            return redirect(url_for('pessoas', mes=mes, ano=ano))
+
+        elif action == 'excluir_desconto':
+            pessoa_id = int(request.form.get('pessoa_id', 0))
+            desconto_id = int(request.form.get('desconto_id', 0))
+            if desconto_id > 0 and pessoa_id > 0 and pessoas_service.excluir_desconto_manual_pessoa(desconto_id, pessoa_id):
+                flash('Desconto removido com sucesso.', 'success')
+            else:
+                flash('Não foi possível remover o desconto.', 'warning')
+            return redirect(url_for('pessoas', mes=mes, ano=ano))
+
+        elif action == 'editar_desconto':
+            pessoa_id = int(request.form.get('pessoa_id', 0))
+            desconto_id = int(request.form.get('desconto_id', 0))
+            descricao_desconto = (request.form.get('descricao_desconto') or '').strip()
+            valor_desconto = _parse_brl_value(request.form.get('valor_desconto'), 0.0)
+            if pessoa_id <= 0 or desconto_id <= 0 or not descricao_desconto:
+                flash('Dados inválidos para editar desconto.', 'warning')
+            elif valor_desconto <= 0:
+                flash('Informe um valor maior que zero.', 'warning')
+            else:
+                ok = pessoas_service.atualizar_desconto_manual_pessoa(
+                    desconto_id, pessoa_id, descricao_desconto, float(valor_desconto)
+                )
+                if ok:
+                    flash('Desconto atualizado com sucesso.', 'success')
+                else:
+                    flash('Desconto não encontrado.', 'warning')
+            return redirect(url_for('pessoas', mes=mes, ano=ano))
     
     pessoas_list = pessoas_service.listar_pessoas(only_ativas=False) # Listar todas as pessoas para gerenciamento
-    totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(mes, ano)
+    totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(
+        mes, ano, mes_cartao_alt, ano_cartao_alt
+    )
     resumos = []
     for p in pessoas_list:
         info = totais_por_pessoa.get(p.id, {"total_mes": 0.0, "total_pago": 0.0, "saldo_pendente": 0.0})
+        total_mes = float(info["total_mes"])
+        total_pago = float(info["total_pago"])
+        saldo_pend = float(info["saldo_pendente"])
+
+        # Para pessoas padrão, exibe o saldo real da conta (Receitas) no cadastro.
+        if p.padrao:
+            saldo_padrao = receita_service.obter_saldo_por_nome(p.nome.strip())
+            if saldo_padrao:
+                total_mes = float(saldo_padrao.saldo_atual)
+                total_pago = 0.0
+                saldo_pend = 0.0
+
         resumos.append({
             'pessoa': p,
-            'total_mes': info["total_mes"],
-            'total_pago': info["total_pago"],
-            'saldo_pend': info["saldo_pendente"]
+            'total_mes': total_mes,
+            'total_pago': total_pago,
+            'saldo_pend': saldo_pend
         })
     
-    total_mes_geral, total_pago_geral, saldo_pend_geral = pessoas_service.calcular_totais_gerais_terceiros(mes, ano)
+    total_mes_geral, total_pago_geral, saldo_pend_geral = pessoas_service.calcular_totais_gerais_terceiros(
+        mes, ano, mes_cartao_alt, ano_cartao_alt
+    )
 
     pessoas_ativas = [p for p in pessoas_list if p.ativo and not p.padrao]
-    contas_status_por_pessoa = {}
-    for p in pessoas_ativas:
-        contas_status_por_pessoa[p.id] = pessoas_service.listar_contas_status_pessoa(
-            p.id, mes, ano, mes_cartao_alt, ano_cartao_alt
-        )
-    
+    ids_pessoas_ativas = {p.id for p in pessoas_ativas}
+    pessoa_ativa_id = request.args.get('pessoa_id', type=int)
+    if pessoa_ativa_id not in ids_pessoas_ativas:
+        pessoa_ativa_id = None
+    contas_status_por_pessoa_mes = {}
+    descontos_itens_por_pessoa_mes = {}
+    previsao_mes_por_pessoa = {}
+    pessoas_para_detalhe = [p for p in pessoas_ativas if p.id == pessoa_ativa_id] if pessoa_ativa_id else []
+    for p in pessoas_para_detalhe:
+        conn_pessoa = get_connection()
+        try:
+            previsao = pessoas_service.listar_previsao_contas_por_mes_pessoa(
+                p.id, mes, ano, mes_cartao_alt, ano_cartao_alt, conn=conn_pessoa
+            )
+            meses_previsao = list(previsao.get("meses", []))
+            chaves_com_contas = set()
+            idx_limite = (ano * 12) + (mes - 1) + 11
+            for mref in meses_previsao:
+                m_ref = int(mref["mes"])
+                a_ref = int(mref["ano"])
+                chaves_com_contas.add(f"{a_ref}-{m_ref:02d}")
+                idx_limite = max(idx_limite, (a_ref * 12) + (m_ref - 1))
+
+            mes_fim = (idx_limite % 12) + 1
+            ano_fim = idx_limite // 12
+            descontos_por_mes = pessoas_service.listar_descontos_manuais_pessoa_intervalo(
+                p.id, mes, ano, mes_fim, ano_fim, conn=conn_pessoa
+            )
+
+            chaves_existentes = {f"{int(m['ano'])}-{int(m['mes']):02d}" for m in meses_previsao}
+            for chave_mes in descontos_por_mes.keys():
+                if chave_mes in chaves_existentes:
+                    continue
+                ano_chave, mes_chave = chave_mes.split("-")
+                meses_previsao.append(
+                    {
+                        "mes": int(mes_chave),
+                        "ano": int(ano_chave),
+                        "total": 0.0,
+                        "itens": [],
+                    }
+                )
+                chaves_existentes.add(chave_mes)
+
+            meses_previsao.sort(key=lambda x: (int(x["ano"]), int(x["mes"])))
+            previsao["meses"] = meses_previsao
+            total_contas_previsto = sum(float(m.get("total", 0.0)) for m in meses_previsao)
+            total_descontos_previsto = 0.0
+            for itens_desc in descontos_por_mes.values():
+                total_descontos_previsto += sum(float(d.get("valor", 0.0)) for d in itens_desc)
+            previsao["total_geral_liquido"] = total_contas_previsto - total_descontos_previsto
+            previsao_mes_por_pessoa[p.id] = previsao
+
+            mapa_mes = {}
+            mapa_descontos_mes = {}
+            refs = []
+            for chave in sorted(chaves_com_contas):
+                ano_ref, mes_ref = chave.split("-")
+                refs.append((int(mes_ref), int(ano_ref)))
+            mapa_mes_otimizado = pessoas_service.listar_contas_status_pessoa_meses(
+                p.id, refs, mes_cartao_alt, ano_cartao_alt, conn=conn_pessoa
+            )
+            for mref in previsao.get("meses", []):
+                m = int(mref["mes"])
+                a = int(mref["ano"])
+                chave = f"{a}-{m:02d}"
+                mapa_mes[chave] = mapa_mes_otimizado.get(chave, [])
+                mapa_descontos_mes[chave] = descontos_por_mes.get(chave, [])
+            contas_status_por_pessoa_mes[p.id] = mapa_mes
+            descontos_itens_por_pessoa_mes[p.id] = mapa_descontos_mes
+        finally:
+            conn_pessoa.close()
+
     return render_template('pessoas.html',
         mes=mes, ano=ano,
+        pessoa_ativa_id=pessoa_ativa_id,
         pessoas=pessoas_list,
         pessoas_ativas=pessoas_ativas,
         resumos=resumos,
-        contas_status_por_pessoa=contas_status_por_pessoa,
+        descontos_itens_por_pessoa_mes=descontos_itens_por_pessoa_mes,
+        previsao_mes_por_pessoa=previsao_mes_por_pessoa,
+        contas_status_por_pessoa_mes=contas_status_por_pessoa_mes,
         total_mes_geral=total_mes_geral,
         total_pago_geral=total_pago_geral,
         saldo_pend_geral=saldo_pend_geral

@@ -559,6 +559,29 @@ body {
     height: 1rem;
 }
 
+.contas-acoes-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: nowrap;
+}
+
+.contas-acao-form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.contas-acao-btn {
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    font-size: 1rem;
+}
+
 /* Pessoas - visual novo */
 .pessoas-tabs {
     gap: 0.5rem;
@@ -815,6 +838,18 @@ body {
     background-color: #f9fafb;
 }
 
+.acoes-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+}
+
+.acoes-inline form {
+    margin: 0;
+}
+
 .cartao-totais {
     margin-bottom: 0.5rem;
 }
@@ -1030,6 +1065,14 @@ body {
     }
     .contas-content {
         padding: 0.9rem;
+    }
+    .contas-acoes-cell {
+        gap: 0.35rem;
+    }
+    .contas-acao-btn {
+        width: 36px;
+        height: 36px;
+        font-size: 0.92rem;
     }
     .pessoas-tabs .nav-link {
         border-radius: 10px;

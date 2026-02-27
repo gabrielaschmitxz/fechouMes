@@ -38,7 +38,7 @@
         <form method="POST">
             <input type="hidden" name="action" value="nova_conta">
             <div class="row form-row">
-                <div class="col-2">
+                <div class="col-3">
                     <div class="form-group">
                         <label>Nome</label>
                         <input type="text" name="nome" required>
@@ -79,8 +79,61 @@
                         <input type="date" name="data_fim">
                     </div>
                 </div>
-                <div class="col-2 form-action-col">
-                    <button type="submit" class="btn btn-primary">Cadastrar conta</button>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Competência</label>
+                        <select name="mes_competencia">
+                            {% for m in range(1, 13) %}
+                                <option value="{{ m }}" {% if m == mes %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-2">
+                    <div class="form-group">
+                        <label>Ano competência</label>
+                        <input type="number" name="ano_competencia" value="{{ ano }}" min="2000" max="2100">
+                    </div>
+                </div>
+            </div>
+            <div class="row form-row">
+                <div class="col-3">
+                    <div class="form-group">
+                        <label>Descontar de</label>
+                        <select name="desconto_pessoa_nome">
+                            <option value="">(Sem desconto)</option>
+                            {% for nome_pessoa in nomes_pessoas %}
+                            <option value="{{ nome_pessoa }}">{{ nome_pessoa }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="form-group">
+                        <label>Origem do saldo</label>
+                        <select name="desconto_origem">
+                            <option value="">(Selecione)</option>
+                            <option value="beneficio">Benefício</option>
+                            <option value="lancamento_conta">Lançamento em conta</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="form-group beneficio-group">
+                        <label>Benefício</label>
+                        <select name="desconto_receita_extra_id">
+                            <option value="">(Selecione se origem for benefício)</option>
+                            {% for b in beneficios %}
+                            <option value="{{ b.id }}">{{ b.descricao }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-3 form-action-col">
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button type="submit" class="btn btn-primary">Cadastrar conta</button>
+                    </div>
                 </div>
             </div>
         </form>
@@ -100,6 +153,8 @@
                 <th>Categoria</th>
                 <th>Valor</th>
                 <th>Vencimento</th>
+                <th>Competência</th>
+                <th>Desconto</th>
                 <th>Data fim</th>
                 <th>Status</th>
                 <th>Ações</th>
@@ -112,41 +167,57 @@
                 <td>{{ c.categoria or '-' }}</td>
                 <td>R$ {{ "{:,.2f}".format(c.valor_padrao or 0) }}</td>
                 <td>{{ c.vencimento_data or (c.vencimento_dia if c.vencimento_dia else '-') }}</td>
+                <td>{{ "%02d"|format(c.mes_referencia) }}/{{ c.ano_referencia }}</td>
+                <td>
+                    {% if c.desconto_pessoa_nome %}
+                        {{ c.desconto_pessoa_nome }} ({{ 'Benefício' if c.desconto_origem == 'beneficio' else 'Lançamento em conta' }})
+                        {% if c.desconto_origem == 'beneficio' and c.desconto_receita_extra_id %}
+                            {% for b in beneficios %}
+                                {% if b.id == c.desconto_receita_extra_id %}
+                                    - {{ b.descricao }}
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
                 <td>{{ c.data_fim or '-' }}</td>
                 <td style="color: {% if c.status == 'Pago' %}green{% else %}red{% endif %};">
                     {{ c.status }}
                 </td>
-                <td>
+                <td class="contas-acoes-cell">
                     <button
                         type="button"
-                        class="btn btn-warning btn-sm"
+                        class="btn btn-warning btn-sm contas-acao-btn"
                         data-toggle="collapse"
                         data-target="#editar-conta-{{ c.id }}"
                         aria-expanded="false"
-                        aria-controls="editar-conta-{{ c.id }}">
-                        Editar
+                        aria-controls="editar-conta-{{ c.id }}"
+                        title="Editar">
+                        &#9998;
                     </button>
-                    <form method="POST" style="display: inline; margin-left: 0.25rem;">
+                    <form method="POST" class="contas-acao-form">
                         <input type="hidden" name="action" value="excluir_conta">
                         <input type="hidden" name="conta_id" value="{{ c.id }}">
-                        <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                        <button type="submit" class="btn btn-danger btn-sm contas-acao-btn" title="Excluir">&#128465;</button>
                     </form>
                     {% if c.status == 'Pendente' %}
-                    <form method="POST" style="display: inline; margin-left: 0.5rem;">
+                    <form method="POST" class="contas-acao-form">
                         <input type="hidden" name="action" value="marcar_pago"> 
                         <input type="hidden" name="conta_id" value="{{ c.id }}">
-                        <button type="submit" class="btn btn-success btn-sm">Marcar como pago</button>
+                        <button type="submit" class="btn btn-success btn-sm contas-acao-btn" title="Marcar como pago">&#10003;</button>
                     </form>
                     {% endif %}
                 </td>
             </tr>
             <tr class="collapse" id="editar-conta-{{ c.id }}">
-                <td colspan="7">
+                <td colspan="9">
                     <form method="POST">
                         <input type="hidden" name="action" value="editar_conta">
                         <input type="hidden" name="conta_id" value="{{ c.id }}">
                         <div class="row form-row">
-                            <div class="col-2">
+                            <div class="col-3">
                                 <div class="form-group">
                                     <label>Nome</label>
                                     <input type="text" name="nome" value="{{ c.nome }}" required>
@@ -187,8 +258,61 @@
                                     <input type="date" name="data_fim" value="{{ c.data_fim or '' }}">
                                 </div>
                             </div>
-                            <div class="col-2 form-action-col">
-                                <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Competência</label>
+                                    <select name="mes_competencia">
+                                        {% for m in range(1, 13) %}
+                                        <option value="{{ m }}" {% if c.mes_referencia == m %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Ano competência</label>
+                                    <input type="number" name="ano_competencia" value="{{ c.ano_referencia }}" min="2000" max="2100">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row form-row">
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Descontar de</label>
+                                    <select name="desconto_pessoa_nome">
+                                        <option value="" {% if not c.desconto_pessoa_nome %}selected{% endif %}>(Sem desconto)</option>
+                                        {% for nome_pessoa in nomes_pessoas %}
+                                        <option value="{{ nome_pessoa }}" {% if c.desconto_pessoa_nome == nome_pessoa %}selected{% endif %}>{{ nome_pessoa }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>Origem do saldo</label>
+                                    <select name="desconto_origem">
+                                        <option value="" {% if not c.desconto_origem %}selected{% endif %}>(Selecione)</option>
+                                        <option value="beneficio" {% if c.desconto_origem == 'beneficio' %}selected{% endif %}>Benefício</option>
+                                        <option value="lancamento_conta" {% if c.desconto_origem == 'lancamento_conta' %}selected{% endif %}>Lançamento em conta</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group beneficio-group">
+                                    <label>Benefício</label>
+                                    <select name="desconto_receita_extra_id">
+                                        <option value="" {% if not c.desconto_receita_extra_id %}selected{% endif %}>(Selecione se origem for benefício)</option>
+                                        {% for b in beneficios %}
+                                        <option value="{{ b.id }}" {% if c.desconto_receita_extra_id == b.id %}selected{% endif %}>{{ b.descricao }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-2">
+                                <div class="form-group">
+                                    <label>&nbsp;</label>
+                                    <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                                </div>
                             </div>
                         </div>
                     </form>
@@ -207,6 +331,30 @@
 {% endif %}
     </section>
 </div>
+
+<script>
+function toggleBeneficioGroup(scope) {
+    const origem = scope.querySelector('select[name="desconto_origem"]');
+    const group = scope.querySelector('.beneficio-group');
+    if (!origem || !group) return;
+    const mostrar = origem.value === 'beneficio';
+    group.style.display = mostrar ? '' : 'none';
+    if (!mostrar) {
+        const selectBeneficio = group.querySelector('select[name="desconto_receita_extra_id"]');
+        if (selectBeneficio) selectBeneficio.value = '';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('form').forEach(function (form) {
+        const origem = form.querySelector('select[name="desconto_origem"]');
+        const group = form.querySelector('.beneficio-group');
+        if (!origem || !group) return;
+        toggleBeneficioGroup(form);
+        origem.addEventListener('change', function () { toggleBeneficioGroup(form); });
+    });
+});
+</script>
 {% endblock %}
 
 

@@ -83,6 +83,54 @@ def calcular_totais_gastos_pix_por_pessoa(mes: int, ano: int) -> Dict[int, float
     return {int(r["pessoa_id"]): float(r["total"]) for r in rows}
 
 
+def calcular_totais_gastos_pix_competencia(mes: int, ano: int) -> Dict[str, float]:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN pessoa_id IS NULL THEN valor ELSE 0 END), 0) AS total_meu,
+            COALESCE(SUM(CASE WHEN pessoa_id IS NOT NULL THEN valor ELSE 0 END), 0) AS total_terceiros
+        FROM gastos_pix
+        WHERE (
+                (mes_referencia < 12 AND mes_referencia + 1 = ? AND ano_referencia = ?)
+             OR (mes_referencia = 12 AND 1 = ? AND ano_referencia + 1 = ?)
+        );
+        """,
+        (mes, ano, mes, ano),
+    )
+    row = cur.fetchone()
+    conn.close()
+    total_meu = float(row["total_meu"] or 0)
+    total_terceiros = float(row["total_terceiros"] or 0)
+    return {
+        "total_meu": total_meu,
+        "total_terceiros": total_terceiros,
+        "total_geral": total_meu + total_terceiros,
+    }
+
+
+def calcular_totais_gastos_pix_por_pessoa_competencia(mes: int, ano: int) -> Dict[int, float]:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT pessoa_id, COALESCE(SUM(valor), 0) AS total
+        FROM gastos_pix
+        WHERE pessoa_id IS NOT NULL
+          AND (
+                (mes_referencia < 12 AND mes_referencia + 1 = ? AND ano_referencia = ?)
+             OR (mes_referencia = 12 AND 1 = ? AND ano_referencia + 1 = ?)
+          )
+        GROUP BY pessoa_id;
+        """,
+        (mes, ano, mes, ano),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return {int(r["pessoa_id"]): float(r["total"]) for r in rows}
+
+
 def atualizar_gasto_pix(
     gasto_id: int,
     descricao: str,

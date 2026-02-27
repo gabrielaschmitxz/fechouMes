@@ -127,7 +127,16 @@
                 document.querySelectorAll("input.money-input").forEach(initMoneyInput);
 
                 document.querySelectorAll("form").forEach(function (form) {
-                    form.addEventListener("submit", function () {
+                    form.addEventListener("submit", function (event) {
+                        const actionInput = form.querySelector('input[name="action"]');
+                        const actionValue = actionInput ? String(actionInput.value || "").trim().toLowerCase() : "";
+                        if (actionValue.startsWith("excluir_")) {
+                            const ok = window.confirm("Tem certeza que deseja excluir este item?\n\nSim para confirmar ou Cancelar para voltar.");
+                            if (!ok) {
+                                event.preventDefault();
+                                return;
+                            }
+                        }
                         form.querySelectorAll("input.money-input").forEach(function (input) {
                             input.value = parseMoneyToDot(input.value);
                         });
