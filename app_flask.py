@@ -1133,6 +1133,11 @@ def pessoas():
             return redirect(url_for('pessoas', mes=mes, ano=ano))
     
     pessoas_list = pessoas_service.listar_pessoas(only_ativas=False) # Listar todas as pessoas para gerenciamento
+    saldos_por_nome = {
+        s.nome.strip().lower(): s
+        for s in receita_service.listar_saldos()
+        if s.nome and s.nome.strip()
+    }
     totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(
         mes, ano, mes_cartao_alt, ano_cartao_alt
     )
@@ -1145,11 +1150,10 @@ def pessoas():
 
         # Para pessoas padrão, exibe o saldo real da conta (Receitas) no cadastro.
         if p.padrao:
-            saldo_padrao = receita_service.obter_saldo_por_nome(p.nome.strip())
-            if saldo_padrao:
-                total_mes = float(saldo_padrao.saldo_atual)
-                total_pago = 0.0
-                saldo_pend = 0.0
+            saldo_padrao = saldos_por_nome.get((p.nome or "").strip().lower())
+            total_mes = float(saldo_padrao.saldo_atual) if saldo_padrao else 0.0
+            total_pago = 0.0
+            saldo_pend = 0.0
 
         resumos.append({
             'pessoa': p,
@@ -1158,9 +1162,9 @@ def pessoas():
             'saldo_pend': saldo_pend
         })
     
-    total_mes_geral, total_pago_geral, saldo_pend_geral = pessoas_service.calcular_totais_gerais_terceiros(
-        mes, ano, mes_cartao_alt, ano_cartao_alt
-    )
+    total_mes_geral = sum(float(info.get("total_mes", 0.0)) for info in totais_por_pessoa.values())
+    total_pago_geral = sum(float(info.get("total_pago", 0.0)) for info in totais_por_pessoa.values())
+    saldo_pend_geral = total_mes_geral - total_pago_geral
 
     pessoas_ativas = [p for p in pessoas_list if p.ativo and not p.padrao]
     ids_pessoas_ativas = {p.id for p in pessoas_ativas}
@@ -1213,7 +1217,7 @@ def pessoas():
             total_descontos_previsto = 0.0
             for itens_desc in descontos_por_mes.values():
                 total_descontos_previsto += sum(float(d.get("valor", 0.0)) for d in itens_desc)
-            previsao["total_geral_liquido"] = total_contas_previsto - total_descontos_previsto
+            previsao["total_geral_liquido"] = max(total_contas_previsto - total_descontos_previsto, 0.0)
             previsao_mes_por_pessoa[p.id] = previsao
 
             mapa_mes = {}
@@ -1252,5 +1256,3 @@ def pessoas():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
-
-
