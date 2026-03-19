@@ -1,6 +1,6 @@
 ﻿"""AplicaÃ§Ã£o Flask principal para Fechou MÃªs - Controle Financeiro"""
 from flask import Flask, render_template, request, redirect, url_for, flash, session
-from datetime import datetime, date
+from datetime import datetime
 from decimal import Decimal
 import sys
 import os
@@ -13,7 +13,6 @@ from finance_app.database import setup_database, get_connection
 from finance_app.services import (
     receita_service,
     cartao_service,
-    gastos_service,
     contas_service,
     pessoas_service,
     auth_service,
@@ -162,325 +161,29 @@ def index():
 
 @app.route('/dashboard')
 def dashboard():
-    """PÃ¡gina principal do dashboard"""
-    mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
-    ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
-    
-    # Buscar dados
-    pessoas_ativas = pessoas_service.listar_pessoas(only_ativas=True)
-    nomes_padrao = [p.nome.strip() for p in pessoas_ativas if p.padrao and p.nome.strip()]
-    receita_service.garantir_saldos_por_nomes(nomes_padrao)
-    resumo_receitas_padrao, _ = receita_service.calcular_resumo_receitas_padrao(nomes_padrao)
-    saldos_beneficios_por_pessoa = receita_service.calcular_saldos_beneficios_por_pessoa(nomes_padrao)
-    gastos_pix_por_pessoa = gastos_service.calcular_totais_gastos_pix_por_pessoa_competencia(mes, ano)
-    pessoa_id_por_nome = {p.nome.strip(): p.id for p in pessoas_ativas if p.nome.strip()}
-    pix_por_nome_padrao = {
-        nome: float(gastos_pix_por_pessoa.get(pessoa_id_por_nome.get(nome, -1), 0.0))
-        for nome in nomes_padrao
-    }
-    total_geral = sum(float(x["saldo_conta"]) for x in resumo_receitas_padrao)
+    """PÃ¡gina principal do dashboard focada no cartÃ£o."""
+    cfg = cartao_service.get_config()
     fatura_info = cartao_service.calcular_fatura_atual()
-    totais_pix = gastos_service.calcular_totais_gastos_pix_competencia(mes, ano)
-    totais_contas = contas_service.calcular_totais_contas_fixas(mes, ano)
-    total_mes_terc, total_pago_terc, saldo_pend_terc = pessoas_service.calcular_totais_gerais_terceiros(mes, ano)
-    
-    total_despesas = (
-        _to_float(totais_contas.get("total"))
-        + _to_float(fatura_info.get("total_geral"))
-        + _to_float(totais_pix.get("total_geral"))
-    )
-    saldo_restante = total_geral - total_despesas
-    
+    limite_total = _to_float(cfg.limite_total)
+    total_fatura = _to_float(fatura_info.get("total_geral"))
+    limite_disponivel = limite_total - total_fatura
+    percentual_utilizado = (total_fatura / limite_total * 100.0) if limite_total > 0 else 0.0
+
     return render_template('dashboard.html',
-        mes=mes, ano=ano,
-        resumo_receitas_padrao=resumo_receitas_padrao,
-        pix_por_nome_padrao=pix_por_nome_padrao,
-        saldos_beneficios_por_pessoa=saldos_beneficios_por_pessoa,
-        total_geral=total_geral,
-        totais_contas=totais_contas,
         fatura_info=fatura_info,
-        totais_pix=totais_pix,
-        total_mes_terc=total_mes_terc,
-        total_pago_terc=total_pago_terc,
-        saldo_pend_terc=saldo_pend_terc,
-        total_despesas=total_despesas,
-        saldo_restante=saldo_restante
+        limite_total=limite_total,
+        limite_disponivel=limite_disponivel,
+        percentual_utilizado=percentual_utilizado,
+        dia_fechamento=cfg.dia_fechamento,
+        dia_vencimento=cfg.dia_vencimento,
+        fatura_paga=cfg.fatura_paga,
     )
 
 
 @app.route('/receitas', methods=['GET', 'POST'])
 def receitas():
-    """PÃ¡gina de receitas"""
-    mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
-    ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
-    pessoas_ativas = pessoas_service.listar_pessoas(only_ativas=True)
-    nomes_padrao_lista = [p.nome.strip() for p in pessoas_ativas if p.padrao and p.nome.strip()]
-    receita_service.garantir_saldos_por_nomes(nomes_padrao_lista)
-    qtd_agendadas_processadas = receita_service.processar_receitas_agendadas_vencidas()
-    if qtd_agendadas_processadas > 0:
-        flash(f'{qtd_agendadas_processadas} receita(s) agendada(s) foram creditadas hoje.', 'info')
-
-    saldos = receita_service.listar_saldos()
-    extras = receita_service.listar_receitas_extras()
-    nomes_padrao = {nome.lower() for nome in nomes_padrao_lista}
-    saldos_padrao = [s for s in saldos if s.nome.strip().lower() in nomes_padrao]
-    
-    if request.method == 'POST':
-        action = request.form.get('action')
-        
-        if action == 'salario':
-            pessoa = request.form.get('pessoa')
-            valor = _parse_brl_value(request.form.get('valor'), 0.0)
-            pessoa_valida = any(s.nome == pessoa for s in saldos_padrao)
-            if not pessoa_valida:
-                flash('Selecione uma pessoa padrão válida.', 'warning')
-            elif valor > 0:
-                receita_service.registrar_salario_recebido(pessoa, valor, 'salario')
-                flash('SalÃ¡rio registrado com sucesso.', 'success')
-            else:
-                flash('Informe um valor maior que zero.', 'warning')
-            return redirect(url_for('receitas'))
-        
-        elif action == 'extra':
-            extra_select = request.form.get('extra_select')
-            descricao_nova = request.form.get('descricao_nova', '')
-            descricao_existente = request.form.get('descricao', '')
-            descricao = descricao_nova if extra_select == 'novo' else (descricao_existente or extra_select)
-            categoria = (request.form.get('categoria_extra') or 'extra').strip().lower()
-            data_recebimento = (request.form.get('data_recebimento') or '').strip()
-            
-            valor = _parse_brl_value(request.form.get('valor'), 0.0)
-            pessoa_saldo = request.form.get('pessoa_saldo')
-            pessoa_valida = any(s.nome == pessoa_saldo for s in saldos_padrao)
-            categorias_validas = {'extra', 'beneficio', 'bonus'}
-            extra_existente = next((e for e in extras if e.descricao == descricao), None)
-            extra_ref = extra_existente
-            data_ref = None
-
-            # Para receita já cadastrada, usa categoria/data salvas como fonte da verdade.
-            if extra_select != 'novo' and extra_existente:
-                categoria = (extra_existente.categoria or categoria).strip().lower()
-                if not data_recebimento and extra_existente.data_recebimento:
-                    data_recebimento = str(extra_existente.data_recebimento)
-
-            if not descricao:
-                flash('Informe a descriÃ§Ã£o.', 'warning')
-                return redirect(url_for('receitas'))
-            if not pessoa_valida:
-                flash('Selecione uma pessoa padrão válida.', 'warning')
-                return redirect(url_for('receitas'))
-            if categoria not in categorias_validas:
-                flash('Categoria inválida para receita.', 'warning')
-                return redirect(url_for('receitas'))
-            if categoria in {'extra', 'bonus'} and valor <= 0:
-                flash('Para Extra/Bônus, informe um valor adicional maior que zero.', 'warning')
-                return redirect(url_for('receitas'))
-            if categoria == 'beneficio':
-                if extra_select == 'novo':
-                    if valor <= 0:
-                        flash('Para novo benefício, informe o valor padrão.', 'warning')
-                        return redirect(url_for('receitas'))
-                elif not extra_existente:
-                    flash('Benefício selecionado não encontrado.', 'warning')
-                    return redirect(url_for('receitas'))
-                elif valor <= 0 and (extra_existente.valor_padrao or 0) <= 0:
-                    flash('Esse benefício não possui valor padrão cadastrado.', 'warning')
-                    return redirect(url_for('receitas'))
-                elif valor <= 0:
-                    valor = float(extra_existente.valor_padrao)
-            if categoria != 'beneficio' and valor <= 0:
-                flash('Informe um valor maior que zero.', 'warning')
-                return redirect(url_for('receitas'))
-            if data_recebimento:
-                try:
-                    data_ref = datetime.strptime(data_recebimento, "%Y-%m-%d").date()
-                except ValueError:
-                    flash('Data recebimento inválida.', 'warning')
-                    return redirect(url_for('receitas'))
-            if categoria == 'beneficio' and extra_select != 'novo' and extra_existente and not data_ref and extra_existente.data_recebimento:
-                try:
-                    data_ref = datetime.strptime(extra_existente.data_recebimento, "%Y-%m-%d").date()
-                except ValueError:
-                    data_ref = None
-            if data_ref and data_ref.year < 2000:
-                flash('Data recebimento inválida.', 'warning')
-                return redirect(url_for('receitas'))
-            
-            if extra_select == 'novo':
-                valor_padrao = valor if categoria == 'beneficio' else None
-                extra_ref = receita_service.criar_ou_atualizar_receita_extra(
-                    descricao,
-                    valor_padrao,
-                    categoria,
-                    data_ref.isoformat() if data_ref else None,
-                )
-
-            saldo = receita_service.obter_saldo_por_nome(pessoa_saldo)
-            if saldo:
-                if data_ref and data_ref > date.today():
-                    receita_service.registrar_receita_agendada(
-                        saldo.id,
-                        categoria,
-                        valor,
-                        descricao,
-                        data_ref.isoformat(),
-                        extra_ref.id if extra_ref else None,
-                    )
-                    flash('Receita agendada para recebimento futuro (não somada no saldo ainda).', 'info')
-                else:
-                    receita_service.registrar_extra_recebido(
-                        saldo.id,
-                        valor,
-                        descricao,
-                        categoria,
-                        extra_ref.id if extra_ref else None,
-                        data_ref.isoformat() if data_ref else date.today().isoformat(),
-                    )
-                    flash('Receita registrada com sucesso.', 'success')
-            else:
-                flash('Saldo da pessoa não encontrado.', 'warning')
-            return redirect(url_for('receitas'))
-
-        elif action == 'editar_receita_extra':
-            extra_id = int(request.form.get('extra_id', 0))
-            descricao = (request.form.get('descricao') or '').strip()
-            categoria = (request.form.get('categoria_extra_edit') or 'extra').strip().lower()
-            data_recebimento = (request.form.get('data_recebimento_edit') or '').strip() or None
-            valor_padrao_raw = (request.form.get('valor_padrao') or '').strip()
-            valor_padrao = (
-                _parse_brl_value(valor_padrao_raw, 0.0) if valor_padrao_raw else None
-            )
-            categorias_validas = {'extra', 'beneficio', 'bonus'}
-            if extra_id <= 0 or not descricao:
-                flash('Dados inválidos para editar receita.', 'warning')
-            elif categoria not in categorias_validas:
-                flash('Categoria inválida para receita.', 'warning')
-            else:
-                try:
-                    if data_recebimento:
-                        datetime.strptime(data_recebimento, "%Y-%m-%d")
-                    if categoria != 'beneficio':
-                        data_recebimento = None
-                    ok = receita_service.atualizar_receita_extra(
-                        extra_id, descricao, valor_padrao, categoria, data_recebimento
-                    )
-                    if ok:
-                        flash('Receita atualizada com sucesso.', 'success')
-                    else:
-                        flash('Receita não encontrada.', 'warning')
-                except ValueError:
-                    flash('Data recebimento inválida.', 'warning')
-                except Exception:
-                    flash('Não foi possível atualizar (nome já pode existir).', 'warning')
-            return redirect(url_for('receitas'))
-
-        elif action == 'excluir_receita_extra':
-            extra_id = int(request.form.get('extra_id', 0))
-            if extra_id > 0 and receita_service.excluir_receita_extra(extra_id):
-                flash('Receita excluída com sucesso.', 'success')
-            else:
-                flash('Não foi possível excluir a receita.', 'warning')
-            return redirect(url_for('receitas'))
-
-        elif action == 'excluir_lancamento':
-            lancamento_id = int(request.form.get('lancamento_id', 0))
-            if lancamento_id > 0 and receita_service.excluir_lancamento_receita(lancamento_id):
-                flash('Lançamento removido com sucesso.', 'success')
-            else:
-                flash('Não foi possível remover o lançamento.', 'warning')
-            return redirect(url_for('receitas'))
-
-        elif action == 'editar_lancamento':
-            lancamento_id = int(request.form.get('lancamento_id', 0))
-            categoria = (request.form.get('categoria') or '').strip().lower()
-            descricao = (request.form.get('descricao') or '').strip()
-            valor = _parse_brl_value(request.form.get('valor'), 0.0)
-
-            categorias_validas = {'salario', 'beneficio', 'bonus', 'extra'}
-            if lancamento_id <= 0:
-                flash('Lançamento inválido.', 'warning')
-            elif categoria not in categorias_validas:
-                flash('Categoria inválida.', 'warning')
-            elif valor <= 0:
-                flash('Informe um valor maior que zero.', 'warning')
-            else:
-                ok = receita_service.atualizar_lancamento_receita(
-                    lancamento_id,
-                    categoria,
-                    descricao or None,
-                    valor,
-                )
-                if ok:
-                    flash('Lançamento atualizado com sucesso.', 'success')
-                else:
-                    flash('Não foi possível atualizar o lançamento.', 'warning')
-            return redirect(url_for('receitas'))
-
-    lancamentos_por_saldo = {}
-    totais_cat_por_saldo = {}
-    totais_receitas_por_saldo = {}
-    gastos_por_saldo = {}
-    totais_gastos_por_saldo = {}
-    resumo_beneficios_por_saldo = {}
-    pix_por_saldo = {}
-    lancamentos_extras_tabela = []
-    pessoas_todas = pessoas_service.listar_pessoas(only_ativas=False)
-    pessoa_por_nome = {p.nome.strip().lower(): p for p in pessoas_todas}
-    gastos_pix_por_pessoa = gastos_service.calcular_totais_gastos_pix_por_pessoa(mes, ano)
-    for s in saldos:
-        lancs = receita_service.listar_lancamentos_por_saldo(s.id)
-        lancamentos_por_saldo[s.id] = lancs
-        totais_cat_por_saldo[s.id] = receita_service.calcular_totais_lancamentos_por_categoria(s.id)
-        totais_receitas_por_saldo[s.id] = sum(float(l.valor) for l in lancs)
-        for l in lancs:
-            if l.categoria == "salario":
-                nome_receita = f"Salário - {s.nome}"
-            elif l.categoria == "beneficio":
-                nome_receita = f"Benefício - {s.nome}"
-            elif l.categoria == "bonus":
-                nome_receita = f"Bônus - {s.nome}"
-            else:
-                nome_receita = f"Receita - {s.nome}"
-            lancamentos_extras_tabela.append(
-                {
-                    "lancamento_id": l.id,
-                    "extra_nome": nome_receita,
-                    "categoria": l.categoria,
-                    "descricao": l.descricao or "",
-                    "data_ref": l.data_recebimento or l.created_at[:10],
-                    "status": "Agendado" if l.tipo_origem == "agendado" else "Recebido",
-                    "valor": l.valor,
-                }
-            )
-
-        pessoa = pessoa_por_nome.get(s.nome.strip().lower())
-        if pessoa:
-            gastos = pessoas_service.listar_contas_status_pessoa(pessoa.id, mes, ano)
-        else:
-            gastos = []
-        gastos_por_saldo[s.id] = gastos
-        totais_gastos_por_saldo[s.id] = sum(float(g["valor"]) for g in gastos)
-        resumo_beneficios_por_saldo[s.id] = receita_service.listar_resumo_beneficios_por_saldo(s.id)
-        pix_por_saldo[s.id] = float(gastos_pix_por_pessoa.get(pessoa.id, 0.0)) if pessoa else 0.0
-    lancamentos_extras_tabela.sort(key=lambda x: str(x["data_ref"]), reverse=True)
-
-    return render_template(
-        'receitas.html',
-        saldos=saldos,
-        saldos_padrao=saldos_padrao,
-        extras=extras,
-        mes=mes,
-        ano=ano,
-        hoje_iso=date.today().isoformat(),
-        lancamentos_extras_tabela=lancamentos_extras_tabela,
-        lancamentos_por_saldo=lancamentos_por_saldo,
-        totais_cat_por_saldo=totais_cat_por_saldo,
-        totais_receitas_por_saldo=totais_receitas_por_saldo,
-        gastos_por_saldo=gastos_por_saldo,
-        totais_gastos_por_saldo=totais_gastos_por_saldo,
-        resumo_beneficios_por_saldo=resumo_beneficios_por_saldo,
-        pix_por_saldo=pix_por_saldo,
-    )
+    flash('A tela de receitas foi removida deste fluxo.', 'info')
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/cartao', methods=['GET', 'POST'])
@@ -685,83 +388,8 @@ def cartao():
 
 @app.route('/gastos-pix', methods=['GET', 'POST'])
 def gastos_pix():
-    """PÃ¡gina de gastos Pix/DÃ©bito"""
-    mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
-    ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
-    
-    if request.method == 'POST':
-        action = request.form.get('action')
-        
-        if action == 'novo_gasto':
-            descricao = request.form.get('descricao')
-            valor = _parse_brl_value(request.form.get('valor'), 0.0)
-            categoria = ''
-            pessoa_id_str = request.form.get('pessoa_id', '')
-            pessoa_id = int(pessoa_id_str) if pessoa_id_str else None
-            receita_extra_id_str = request.form.get('receita_extra_id', '')
-            receita_extra_id = int(receita_extra_id_str) if receita_extra_id_str else None
-            saldo_beneficio_nome = (request.form.get('saldo_beneficio_nome') or '').strip()
-            
-            if not descricao or valor <= 0:
-                flash('Informe descriÃ§Ã£o e valor maior que zero.', 'warning')
-                return redirect(url_for('gastos_pix', mes=mes, ano=ano))
-            if pessoa_id is None:
-                flash('Selecione uma pessoa para o gasto.', 'warning')
-                return redirect(url_for('gastos_pix', mes=mes, ano=ano))
-            if receita_extra_id and not saldo_beneficio_nome:
-                flash('Selecione o saldo para abater o benefício.', 'warning')
-                return redirect(url_for('gastos_pix', mes=mes, ano=ano))
-            
-            gastos_service.registrar_gasto_pix(
-                descricao, valor, categoria, pessoa_id, receita_extra_id, mes, ano
-            )
-            if receita_extra_id:
-                ok = receita_service.registrar_abatimento_beneficio(
-                    saldo_beneficio_nome, receita_extra_id, valor, descricao
-                )
-                if not ok:
-                    flash('Gasto salvo, mas não foi possível abater do benefício.', 'warning')
-            flash('Gasto registrado com sucesso.', 'success')
-            return redirect(url_for('gastos_pix', mes=mes, ano=ano))
-
-        elif action == 'editar_gasto':
-            gasto_id = int(request.form.get('gasto_id', 0))
-            descricao = (request.form.get('descricao') or '').strip()
-            valor = _parse_brl_value(request.form.get('valor'), 0.0)
-            pessoa_id_str = request.form.get('pessoa_id', '')
-            pessoa_id = int(pessoa_id_str) if pessoa_id_str else None
-
-            if gasto_id <= 0 or not descricao or valor <= 0 or pessoa_id is None:
-                flash('Dados inválidos para editar gasto.', 'warning')
-                return redirect(url_for('gastos_pix', mes=mes, ano=ano))
-
-            ok = gastos_service.atualizar_gasto_pix(gasto_id, descricao, valor, pessoa_id)
-            if ok:
-                flash('Gasto atualizado com sucesso.', 'success')
-            else:
-                flash('Não foi possível atualizar o gasto.', 'warning')
-            return redirect(url_for('gastos_pix', mes=mes, ano=ano))
-
-        elif action == 'excluir_gasto':
-            gasto_id = int(request.form.get('gasto_id', 0))
-            if gasto_id > 0 and gastos_service.excluir_gasto_pix(gasto_id):
-                flash('Gasto excluído com sucesso.', 'success')
-            else:
-                flash('Não foi possível excluir o gasto.', 'warning')
-            return redirect(url_for('gastos_pix', mes=mes, ano=ano))
-    
-    gastos = gastos_service.listar_gastos_pix(mes, ano)
-    totais = gastos_service.calcular_totais_gastos_pix(mes, ano)
-    pessoas = pessoas_service.listar_pessoas()
-    pessoas_ativas = pessoas_service.listar_pessoas(only_ativas=True)
-    nomes_padrao = [p.nome.strip() for p in pessoas_ativas if p.padrao and p.nome.strip()]
-    receita_service.garantir_saldos_por_nomes(nomes_padrao)
-    saldos = receita_service.listar_saldos()
-    saldos_padrao = [s for s in saldos if s.nome in nomes_padrao]
-    beneficios = [e for e in receita_service.listar_receitas_extras() if e.categoria == 'beneficio']
-    
-    return render_template('gastos_pix.html', 
-        mes=mes, ano=ano, gastos=gastos, totais=totais, pessoas=pessoas, beneficios=beneficios, saldos_padrao=saldos_padrao)
+    flash('A tela de gastos Pix foi removida deste fluxo.', 'info')
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/contas-fixas', methods=['GET', 'POST'])
@@ -769,39 +397,6 @@ def contas_fixas():
     """PÃ¡gina de contas fixas"""
     mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
     ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
-
-    # Reconcilia contas já pagas com desconto configurado, mas ainda não aplicado.
-    reconciliadas = 0
-    for conta_paga in contas_service.listar_contas_pagas_com_desconto_pendente():
-        valor = abs(float(conta_paga.valor_padrao or 0))
-        if valor <= 0:
-            continue
-        if conta_paga.desconto_origem == 'beneficio':
-            if not conta_paga.desconto_receita_extra_id:
-                continue
-            ok_abat = receita_service.registrar_abatimento_beneficio(
-                conta_paga.desconto_pessoa_nome or "",
-                int(conta_paga.desconto_receita_extra_id),
-                valor,
-                conta_paga.nome,
-            )
-            if ok_abat:
-                contas_service.marcar_desconto_como_aplicado(conta_paga.id)
-                reconciliadas += 1
-        else:
-            saldo = receita_service.obter_saldo_por_nome(conta_paga.desconto_pessoa_nome or "")
-            if not saldo:
-                continue
-            receita_service.registrar_extra_recebido(
-                saldo.id,
-                -valor,
-                descricao=f"Conta fixa paga: {conta_paga.nome}",
-                categoria='extra',
-            )
-            contas_service.marcar_desconto_como_aplicado(conta_paga.id)
-            reconciliadas += 1
-    if reconciliadas > 0 and request.method == 'GET':
-        flash(f'{reconciliadas} desconto(s) de contas fixas foram reconciliados.', 'info')
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -901,37 +496,10 @@ def contas_fixas():
                 return redirect(url_for('contas_fixas', mes=mes, ano=ano))
 
             foi_atualizada = contas_service.marcar_conta_como_paga(conta_id)
-            if foi_atualizada and not conta.desconto_aplicado and conta.desconto_pessoa_nome and (conta.valor_padrao or 0) > 0:
-                if conta.desconto_origem == 'beneficio':
-                    if not conta.desconto_receita_extra_id:
-                        flash('Conta marcada como paga, mas o benefício não está configurado para abatimento.', 'warning')
-                    else:
-                        ok_abat = receita_service.registrar_abatimento_beneficio(
-                            conta.desconto_pessoa_nome,
-                            int(conta.desconto_receita_extra_id),
-                            abs(float(conta.valor_padrao or 0)),
-                            conta.nome,
-                        )
-                        if not ok_abat:
-                            flash('Conta marcada como paga, mas não foi possível abater o benefício selecionado.', 'warning')
-                        else:
-                            contas_service.marcar_desconto_como_aplicado(conta_id)
-                else:
-                    saldo = receita_service.obter_saldo_por_nome(conta.desconto_pessoa_nome)
-                    if not saldo:
-                        flash(f"Conta marcada como paga, mas o saldo '{conta.desconto_pessoa_nome}' não foi encontrado para abatimento.", 'warning')
-                    else:
-                        receita_service.registrar_extra_recebido(
-                            saldo.id,
-                            -abs(float(conta.valor_padrao or 0)),
-                            descricao=f"Conta fixa paga: {conta.nome}",
-                            categoria='extra',
-                        )
-                        contas_service.marcar_desconto_como_aplicado(conta_id)
-            elif foi_atualizada and conta.desconto_origem and not conta.desconto_pessoa_nome:
-                flash('Conta marcada como paga, mas sem pessoa configurada para desconto.', 'warning')
-
-            flash('Conta marcada como paga com sucesso.', 'success')
+            if foi_atualizada:
+                flash('Conta marcada como paga com sucesso.', 'success')
+            else:
+                flash('A conta já estava marcada como paga.', 'info')
             return redirect(url_for('contas_fixas', mes=mes, ano=ano))
     
     # Gera automaticamente do mÃªs atual

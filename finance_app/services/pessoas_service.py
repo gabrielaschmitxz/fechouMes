@@ -330,10 +330,6 @@ def _add_meses(mes: int, ano: int, delta: int) -> Tuple[int, int]:
     return (idx % 12) + 1, idx // 12
 
 
-def _competencia_pix_proximo_mes(mes: int, ano: int) -> Tuple[int, int]:
-    return _add_meses(mes, ano, 1)
-
-
 def _competencia_conta_fixa(
     mes_referencia: int,
     ano_referencia: int,
@@ -465,42 +461,6 @@ def listar_contas_pendentes_pessoa(
           );
         """,
         tuple(params_cartao),
-    )
-    pendentes.extend(dict(r) for r in cur.fetchall())
-
-    cur.execute(
-        """
-        SELECT
-            'gasto_pix' AS tipo,
-            gp.id AS item_id,
-            ('Gasto Pix/Débito: ' || gp.descricao) AS descricao,
-            gp.valor AS valor
-        FROM gastos_pix gp
-        WHERE gp.pessoa_id = ?
-          AND (
-                (gp.mes_referencia < 12 AND gp.mes_referencia + 1 = ? AND gp.ano_referencia = ?)
-             OR (gp.mes_referencia = 12 AND 1 = ? AND gp.ano_referencia + 1 = ?)
-          )
-          AND NOT EXISTS (
-              SELECT 1
-              FROM pagamentos_terceiros_itens pi
-              WHERE pi.pessoa_id = ?
-                AND pi.tipo = 'gasto_pix'
-                AND pi.item_id = gp.id
-                AND pi.mes_referencia = ?
-                AND pi.ano_referencia = ?
-          );
-        """,
-        (
-            pessoa_id,
-            mes_referencia,
-            ano_referencia,
-            mes_referencia,
-            ano_referencia,
-            pessoa_id,
-            mes_referencia,
-            ano_referencia,
-        ),
     )
     pendentes.extend(dict(r) for r in cur.fetchall())
 
@@ -704,34 +664,6 @@ def listar_contas_status_pessoa_meses(
             }
         )
 
-    # Pix/Débito: competência no mês seguinte.
-    cur.execute(
-        """
-        SELECT id, descricao, valor, mes_referencia, ano_referencia
-        FROM gastos_pix
-        WHERE pessoa_id = ?
-          AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
-        """,
-        (pessoa_id, idx_min - 1, idx_max - 1),
-    )
-    for r in cur.fetchall():
-        m_comp, a_comp = _competencia_pix_proximo_mes(int(r["mes_referencia"]), int(r["ano_referencia"]))
-        if (m_comp, a_comp) not in refs_set:
-            continue
-        chave = f"{a_comp}-{m_comp:02d}"
-        item_id = int(r["id"])
-        mapa[chave].append(
-            {
-                "tipo": "gasto_pix",
-                "item_id": item_id,
-                "descricao": f"Gasto Pix/Débito: {r['descricao']}",
-                "valor": float(r["valor"]),
-                "mes_referencia": m_comp,
-                "ano_referencia": a_comp,
-                "pago": ("gasto_pix", item_id, m_comp, a_comp) in pagos_keys,
-            }
-        )
-
     # Contas fixas vinculadas à pessoa.
     nome_pessoa = _obter_nome_pessoa(cur, pessoa_id)
     if nome_pessoa:
@@ -906,44 +838,6 @@ def _listar_contas_status_pessoa_legacy(
           AND ({filtros_cartao});
         """,
         tuple([params_cartao[-1]] + params_cartao[:-1]),
-    )
-    contas.extend(dict(r) for r in cur.fetchall())
-
-    cur.execute(
-        """
-        SELECT
-            'gasto_pix' AS tipo,
-            gp.id AS item_id,
-            ('Gasto Pix/Débito: ' || gp.descricao) AS descricao,
-            gp.valor AS valor,
-            CASE WHEN gp.mes_referencia = 12 THEN 1 ELSE gp.mes_referencia + 1 END AS mes_referencia,
-            CASE WHEN gp.mes_referencia = 12 THEN gp.ano_referencia + 1 ELSE gp.ano_referencia END AS ano_referencia,
-            EXISTS (
-                SELECT 1
-                FROM pagamentos_terceiros_itens pi
-                WHERE pi.pessoa_id = ?
-                  AND pi.tipo = 'gasto_pix'
-                  AND pi.item_id = gp.id
-                  AND pi.mes_referencia = ?
-                  AND pi.ano_referencia = ?
-            ) AS pago
-        FROM gastos_pix gp
-        WHERE gp.pessoa_id = ?
-          AND (
-                (gp.mes_referencia < 12 AND gp.mes_referencia + 1 = ? AND gp.ano_referencia = ?)
-             OR (gp.mes_referencia = 12 AND 1 = ? AND gp.ano_referencia + 1 = ?)
-          );
-        """,
-        (
-            pessoa_id,
-            mes_referencia,
-            ano_referencia,
-            pessoa_id,
-            mes_referencia,
-            ano_referencia,
-            mes_referencia,
-            ano_referencia,
-        ),
     )
     contas.extend(dict(r) for r in cur.fetchall())
 
@@ -1221,23 +1115,6 @@ def calcular_totais_por_pessoa(
 
     cur.execute(
         """
-        SELECT id, pessoa_id, valor, mes_referencia, ano_referencia
-        FROM gastos_pix
-        WHERE pessoa_id IS NOT NULL
-          AND (
-                (mes_referencia < 12 AND mes_referencia + 1 = ? AND ano_referencia = ?)
-             OR (mes_referencia = 12 AND 1 = ? AND ano_referencia + 1 = ?)
-          );
-        """,
-        (mes, ano, mes, ano),
-    )
-    pix_rows = cur.fetchall()
-    for row in pix_rows:
-        pessoa_id = row["pessoa_id"]
-        totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
-        totals[pessoa_id]["total_mes"] += float(row["valor"])
-    cur.execute(
-        """
         SELECT
             p.id AS pessoa_id,
             COALESCE(cf.valor_padrao, 0) AS valor_padrao,
@@ -1293,12 +1170,6 @@ def calcular_totais_por_pessoa(
         if int(row["mes_referencia"]) == int(mes) and int(row["ano_referencia"]) == int(ano):
             if (pid, "cartao_avista", item_id) in pagos_mes_keys:
                 _add_pago(pid, float(row["valor"]))
-
-    for row in pix_rows:
-        pid = int(row["pessoa_id"])
-        item_id = int(row["id"])
-        if (pid, "gasto_pix", item_id) in pagos_mes_keys:
-            _add_pago(pid, float(row["valor"]))
 
     # Parceladas pagas no mês alvo (reaproveita carga de parceladas + mapa de quitadas).
     for row in parceladas_ativas:
@@ -1412,28 +1283,6 @@ def listar_previsao_contas_por_mes_pessoa(
             int(r["mes_referencia"]),
             int(r["ano_referencia"]),
             f"Cartão à vista: {r['descricao']}",
-            float(r["valor"]),
-        )
-
-    # Gastos pix por competência
-    cur.execute(
-        """
-        SELECT descricao, valor, mes_referencia, ano_referencia
-        FROM gastos_pix
-        WHERE pessoa_id = ?
-          AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
-        """,
-        (pessoa_id, inicio_idx - 1, fim_idx - 1),
-    )
-    for r in cur.fetchall():
-        mes_comp, ano_comp = _competencia_pix_proximo_mes(
-            int(r["mes_referencia"]),
-            int(r["ano_referencia"]),
-        )
-        add_item(
-            mes_comp,
-            ano_comp,
-            f"Gasto Pix/Débito: {r['descricao']}",
             float(r["valor"]),
         )
 

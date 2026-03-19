@@ -315,7 +315,7 @@ def marcar_conta_como_paga(conta_id: int) -> bool:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE contas_fixas SET status = 'Pago' WHERE id = ? AND status <> 'Pago';",
+        "UPDATE contas_fixas SET status = 'Pago', desconto_aplicado = TRUE WHERE id = ? AND status <> 'Pago';",
         (conta_id,),
     )
     ok = cur.rowcount > 0
