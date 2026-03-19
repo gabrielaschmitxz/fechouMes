@@ -74,6 +74,22 @@ def listar_parceladas_ativas() -> List[CartaoParcelada]:
     return [CartaoParcelada(**dict(r)) for r in rows]
 
 
+def listar_parceladas() -> List[CartaoParcelada]:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual,
+               mes_inicio, ano_inicio, status, pessoa_id
+        FROM cartao_parceladas
+        ORDER BY id;
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [CartaoParcelada(**dict(r)) for r in rows]
+
+
 def criar_parcelada(
     descricao: str,
     valor_total: float,
@@ -139,21 +155,36 @@ def listar_avista_mes(mes: int, ano: int) -> List[CartaoAvista]:
     return [CartaoAvista(**dict(r)) for r in rows]
 
 
-def calcular_fatura_atual() -> Dict[str, float]:
-    """Retorna totais: {'parceladas_meu', 'parceladas_terceiros', 'avista_meu', 'avista_terceiros', 'total_meu', 'total_terceiros', 'total_geral'}"""
-    mes_ref, ano_ref = mes_ano_fatura_atual()
+def mes_ano_fatura_em_aberto(hoje: date | None = None) -> Tuple[int, int]:
+    mes_ref, ano_ref = mes_ano_fatura_atual(hoje=hoje)
+    cfg = get_config()
+    if cfg.fatura_paga:
+        return _add_meses(mes_ref, ano_ref, 1)
+    return mes_ref, ano_ref
 
-    # Parceladas: todas ativas contam para a fatura atual
-    parceladas = listar_parceladas_ativas()
-    total_parceladas_meu = sum(p.valor_parcela for p in parceladas if p.pessoa_id is None)
-    total_parceladas_terceiros = sum(
-        p.valor_parcela for p in parceladas if p.pessoa_id is not None
-    )
 
-    # Ã€ vista: apenas mÃªs/ano de referÃªncia
+def calcular_fatura_competencia(mes_ref: int, ano_ref: int) -> Dict[str, float]:
+    """Retorna totais da competência informada."""
+    idx_alvo = ano_ref * 12 + (mes_ref - 1)
+
+    # Parceladas: calcula pela competência da parcela, inclusive histórico.
+    parceladas = listar_parceladas()
+    total_parceladas_meu = 0.0
+    total_parceladas_terceiros = 0.0
+    for p in parceladas:
+        idx_inicio = int(p.ano_inicio) * 12 + (int(p.mes_inicio) - 1)
+        parcela_num = idx_alvo - idx_inicio + 1
+        if parcela_num < 1 or parcela_num > int(p.total_parcelas):
+            continue
+        if p.pessoa_id is None:
+            total_parceladas_meu += float(p.valor_parcela)
+        else:
+            total_parceladas_terceiros += float(p.valor_parcela)
+
+    # À vista: apenas mês/ano de referência
     avista = listar_avista_mes(mes_ref, ano_ref)
-    total_avista_meu = sum(a.valor for a in avista if a.pessoa_id is None)
-    total_avista_terceiros = sum(a.valor for a in avista if a.pessoa_id is not None)
+    total_avista_meu = sum(float(a.valor) for a in avista if a.pessoa_id is None)
+    total_avista_terceiros = sum(float(a.valor) for a in avista if a.pessoa_id is not None)
 
     total_meu = total_parceladas_meu + total_avista_meu
     total_terceiros = total_parceladas_terceiros + total_avista_terceiros
@@ -170,6 +201,12 @@ def calcular_fatura_atual() -> Dict[str, float]:
         "total_terceiros": total_terceiros,
         "total_geral": total_geral,
     }
+
+
+def calcular_fatura_atual() -> Dict[str, float]:
+    """Retorna totais da fatura em aberto no momento."""
+    mes_ref, ano_ref = mes_ano_fatura_em_aberto()
+    return calcular_fatura_competencia(mes_ref, ano_ref)
 
 
 def marcar_fatura_como_paga() -> None:
@@ -247,8 +284,8 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
             valor_parcela AS valor,
             total_parcelas,
             parcela_atual,
-            mes_inicio AS mes_ref,
-            ano_inicio AS ano_ref,
+            mes_inicio,
+            ano_inicio,
             status,
             pessoa_id
         FROM cartao_parceladas
@@ -257,35 +294,15 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
     )
     for r in cur.fetchall():
         item = dict(r)
-        item["tipo"] = "parcelado"
-        status = str(item.get("status") or "")
-        parcela_atual = int(item.get("parcela_atual") or 1)
         total_parcelas = int(item.get("total_parcelas") or 1)
-        mes_inicio = int(item.get("mes_ref") or 1)
-        ano_inicio = int(item.get("ano_ref") or date.today().year)
+        parcela_atual = int(item.get("parcela_atual") or 1)
+        mes_inicio = int(item.get("mes_inicio") or 1)
+        ano_inicio = int(item.get("ano_inicio") or date.today().year)
+        status = str(item.get("status") or "")
 
-        if status == "Ativa" and parcela_atual <= total_parcelas:
-            for off in range(total_parcelas - parcela_atual + 1):
-                parcela_exibicao = parcela_atual + off
-                mes_ref, ano_ref = _add_meses(mes_inicio, ano_inicio, off)
-                rows.append(
-                    {
-                        "tipo": "parcelado",
-                        "id": int(item["id"]),
-                        "descricao": str(item["descricao"]),
-                        "valor": float(item["valor"]),
-                        "total_parcelas": total_parcelas,
-                        "parcela_atual": parcela_atual,
-                        "parcela_exibicao": parcela_exibicao,
-                        "mes_ref": mes_ref,
-                        "ano_ref": ano_ref,
-                        "mes_inicio": mes_inicio,
-                        "ano_inicio": ano_inicio,
-                        "status": status,
-                        "pessoa_id": item.get("pessoa_id"),
-                    }
-                )
-        else:
+        for off in range(total_parcelas):
+            parcela_exibicao = off + 1
+            mes_ref, ano_ref = _add_meses(mes_inicio, ano_inicio, off)
             rows.append(
                 {
                     "tipo": "parcelado",
@@ -294,9 +311,9 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
                     "valor": float(item["valor"]),
                     "total_parcelas": total_parcelas,
                     "parcela_atual": parcela_atual,
-                    "parcela_exibicao": parcela_atual,
-                    "mes_ref": mes_inicio,
-                    "ano_ref": ano_inicio,
+                    "parcela_exibicao": parcela_exibicao,
+                    "mes_ref": mes_ref,
+                    "ano_ref": ano_ref,
                     "mes_inicio": mes_inicio,
                     "ano_inicio": ano_inicio,
                     "status": status,

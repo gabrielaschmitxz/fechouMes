@@ -108,27 +108,6 @@
                         </select>
                     </div>
                 </div>
-                <div class="col-3">
-                    <div class="form-group">
-                        <label>Origem do saldo</label>
-                        <select name="desconto_origem">
-                            <option value="">(Selecione)</option>
-                            <option value="beneficio">Benefício</option>
-                            <option value="lancamento_conta">Lançamento em conta</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="col-3">
-                    <div class="form-group beneficio-group">
-                        <label>Benefício</label>
-                        <select name="desconto_receita_extra_id">
-                            <option value="">(Selecione se origem for benefício)</option>
-                            {% for b in beneficios %}
-                            <option value="{{ b.id }}">{{ b.descricao }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
                 <div class="col-3 form-action-col">
                     <div class="form-group">
                         <label>&nbsp;</label>
@@ -170,14 +149,7 @@
                 <td>{{ "%02d"|format(c.mes_referencia) }}/{{ c.ano_referencia }}</td>
                 <td>
                     {% if c.desconto_pessoa_nome %}
-                        {{ c.desconto_pessoa_nome }} ({{ 'Benefício' if c.desconto_origem == 'beneficio' else 'Lançamento em conta' }})
-                        {% if c.desconto_origem == 'beneficio' and c.desconto_receita_extra_id %}
-                            {% for b in beneficios %}
-                                {% if b.id == c.desconto_receita_extra_id %}
-                                    - {{ b.descricao }}
-                                {% endif %}
-                            {% endfor %}
-                        {% endif %}
+                        {{ c.desconto_pessoa_nome }}
                     {% else %}
                         -
                     {% endif %}
@@ -289,27 +261,6 @@
                             </div>
                             <div class="col-2">
                                 <div class="form-group">
-                                    <label>Origem do saldo</label>
-                                    <select name="desconto_origem">
-                                        <option value="" {% if not c.desconto_origem %}selected{% endif %}>(Selecione)</option>
-                                        <option value="beneficio" {% if c.desconto_origem == 'beneficio' %}selected{% endif %}>Benefício</option>
-                                        <option value="lancamento_conta" {% if c.desconto_origem == 'lancamento_conta' %}selected{% endif %}>Lançamento em conta</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-2">
-                                <div class="form-group beneficio-group">
-                                    <label>Benefício</label>
-                                    <select name="desconto_receita_extra_id">
-                                        <option value="" {% if not c.desconto_receita_extra_id %}selected{% endif %}>(Selecione se origem for benefício)</option>
-                                        {% for b in beneficios %}
-                                        <option value="{{ b.id }}" {% if c.desconto_receita_extra_id == b.id %}selected{% endif %}>{{ b.descricao }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="col-2">
-                                <div class="form-group">
                                     <label>&nbsp;</label>
                                     <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
                                 </div>
@@ -332,29 +283,4 @@
     </section>
 </div>
 
-<script>
-function toggleBeneficioGroup(scope) {
-    const origem = scope.querySelector('select[name="desconto_origem"]');
-    const group = scope.querySelector('.beneficio-group');
-    if (!origem || !group) return;
-    const mostrar = origem.value === 'beneficio';
-    group.style.display = mostrar ? '' : 'none';
-    if (!mostrar) {
-        const selectBeneficio = group.querySelector('select[name="desconto_receita_extra_id"]');
-        if (selectBeneficio) selectBeneficio.value = '';
-    }
-}
-
-document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('form').forEach(function (form) {
-        const origem = form.querySelector('select[name="desconto_origem"]');
-        const group = form.querySelector('.beneficio-group');
-        if (!origem || !group) return;
-        toggleBeneficioGroup(form);
-        origem.addEventListener('change', function () { toggleBeneficioGroup(form); });
-    });
-});
-</script>
 {% endblock %}
-
-

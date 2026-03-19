@@ -13,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from finance_app.database import setup_database, get_connection, USE_POSTGRES
 from finance_app.services import (
-    receita_service,
     cartao_service,
     contas_service,
     pessoas_service,
@@ -80,6 +79,11 @@ def _listar_competencias(base_mes: int, base_ano: int):
             }
         )
     return competencias
+
+
+def _deslocar_competencia(mes: int, ano: int, delta: int):
+    indice = (ano * 12 + mes - 1) + delta
+    return (indice % 12) + 1, indice // 12
 
 
 def _parse_brl_value(raw_value, default=0.0):
@@ -210,7 +214,8 @@ def receitas():
 def cartao():
     """PÃ¡gina do cartÃ£o de crÃ©dito"""
     cfg = cartao_service.get_config()
-    mes_comp_padrao, ano_comp_padrao = cartao_service.mes_ano_fatura_atual()
+    mes_fatura_aberta, ano_fatura_aberta = cartao_service.mes_ano_fatura_em_aberto()
+    mes_comp_padrao, ano_comp_padrao = mes_fatura_aberta, ano_fatura_aberta
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -353,13 +358,22 @@ def cartao():
                 flash('Não foi possível atualizar o lançamento.', 'warning')
             return redirect(url_for('cartao'))
     
-    info = cartao_service.calcular_fatura_atual()
+    mes_fatura_exibicao, ano_fatura_exibicao = _normalizar_competencia(
+        request.args.get('mes_fatura'),
+        request.args.get('ano_fatura'),
+        mes_fatura_aberta,
+        ano_fatura_aberta,
+    )
+    info = cartao_service.calcular_fatura_competencia(mes_fatura_exibicao, ano_fatura_exibicao)
     pessoas = pessoas_service.listar_pessoas()
     lancamentos_todos = cartao_service.listar_todos_lancamentos()
     competencias = _listar_competencias(mes_comp_padrao, ano_comp_padrao)
     anos_competencia = sorted(
         {c["ano"] for c in competencias}.union({int(l["ano_ref"]) for l in lancamentos_todos})
     )
+    mes_fatura_anterior, ano_fatura_anterior = _deslocar_competencia(mes_fatura_exibicao, ano_fatura_exibicao, -1)
+    mes_fatura_proxima, ano_fatura_proxima = _deslocar_competencia(mes_fatura_exibicao, ano_fatura_exibicao, 1)
+    exibindo_fatura_aberta = (mes_fatura_exibicao, ano_fatura_exibicao) == (mes_fatura_aberta, ano_fatura_aberta)
     pessoa_nome_por_id = {p.id: p.nome for p in pessoas}
     for l in lancamentos_todos:
         l["pessoa_nome"] = pessoa_nome_por_id.get(l.get("pessoa_id")) or "Nosso"
@@ -403,6 +417,15 @@ def cartao():
         ano_comp_padrao=ano_comp_padrao,
         lancamentos_todos=lancamentos_todos,
         lancamentos_por_competencia=lancamentos_por_competencia,
+        mes_fatura_aberta=mes_fatura_aberta,
+        ano_fatura_aberta=ano_fatura_aberta,
+        mes_fatura_exibicao=mes_fatura_exibicao,
+        ano_fatura_exibicao=ano_fatura_exibicao,
+        mes_fatura_anterior=mes_fatura_anterior,
+        ano_fatura_anterior=ano_fatura_anterior,
+        mes_fatura_proxima=mes_fatura_proxima,
+        ano_fatura_proxima=ano_fatura_proxima,
+        exibindo_fatura_aberta=exibindo_fatura_aberta,
     )
 
 
@@ -429,26 +452,19 @@ def contas_fixas():
             mes_comp = request.form.get('mes_competencia', type=int, default=mes)
             ano_comp = request.form.get('ano_competencia', type=int, default=ano)
             desconto_pessoa_nome = (request.form.get('desconto_pessoa_nome') or '').strip() or None
-            desconto_origem = (request.form.get('desconto_origem') or '').strip() or None
-            desconto_receita_extra_id_str = (request.form.get('desconto_receita_extra_id') or '').strip()
-            desconto_receita_extra_id = int(desconto_receita_extra_id_str) if desconto_receita_extra_id_str else None
             vencimento_data = (request.form.get('vencimento_data') or '').strip() or None
             data_fim_str = (request.form.get('data_fim') or '').strip() or None
             
             if not nome:
                 flash('Informe o nome da conta.', 'warning')
-            elif desconto_origem and not desconto_pessoa_nome:
-                flash('Selecione a pessoa para desconto.', 'warning')
-            elif desconto_origem == 'beneficio' and not desconto_receita_extra_id:
-                flash('Selecione o benefício para abatimento.', 'warning')
             else:
                 contas_service.criar_conta_fixa(
                     nome,
                     categoria,
                     valor,
                     desconto_pessoa_nome,
-                    desconto_origem,
-                    desconto_receita_extra_id,
+                    None,
+                    None,
                     vencimento_data,
                     None,
                     mes_comp,
@@ -466,9 +482,6 @@ def contas_fixas():
             valor_str = (request.form.get('valor') or '').strip()
             valor = _parse_brl_value(valor_str, None) if valor_str else None
             desconto_pessoa_nome = (request.form.get('desconto_pessoa_nome') or '').strip() or None
-            desconto_origem = (request.form.get('desconto_origem') or '').strip() or None
-            desconto_receita_extra_id_str = (request.form.get('desconto_receita_extra_id') or '').strip()
-            desconto_receita_extra_id = int(desconto_receita_extra_id_str) if desconto_receita_extra_id_str else None
             vencimento_data = (request.form.get('vencimento_data') or '').strip() or None
             data_fim = (request.form.get('data_fim') or '').strip() or None
             mes_comp = request.form.get('mes_competencia', type=int, default=mes)
@@ -476,10 +489,6 @@ def contas_fixas():
 
             if conta_id <= 0 or not nome:
                 flash('Dados inválidos para editar conta.', 'warning')
-            elif desconto_origem and not desconto_pessoa_nome:
-                flash('Selecione a pessoa para desconto.', 'warning')
-            elif desconto_origem == 'beneficio' and not desconto_receita_extra_id:
-                flash('Selecione o benefício para abatimento.', 'warning')
             else:
                 ok = contas_service.atualizar_conta_fixa(
                     conta_id,
@@ -487,8 +496,8 @@ def contas_fixas():
                     categoria,
                     valor,
                     desconto_pessoa_nome,
-                    desconto_origem,
-                    desconto_receita_extra_id,
+                    None,
+                    None,
                     vencimento_data,
                     data_fim,
                     mes_comp,
@@ -523,20 +532,16 @@ def contas_fixas():
         contas_service.gerar_contas_fixas_mes_atual(conn=conn)
         contas = contas_service.listar_contas_fixas(mes, ano, conn=conn)
         totais = contas_service.calcular_totais_contas_fixas(mes, ano, contas=contas)
-        saldos = receita_service.listar_saldos(conn=conn)
-        beneficios = [e for e in receita_service.listar_receitas_extras(conn=conn) if e.categoria == 'beneficio']
         pessoas_todas = pessoas_service.listar_pessoas(only_ativas=False, conn=conn)
     finally:
         conn.close()
-    nomes_pessoas = sorted({p.nome.strip() for p in pessoas_todas if p.nome and p.nome.strip()})
-    for s in saldos:
-        nome = s.nome.strip()
-        if nome and nome not in nomes_pessoas:
-            nomes_pessoas.append(nome)
-    nomes_pessoas = sorted(set(nomes_pessoas), key=lambda x: x.lower())
+    nomes_pessoas = sorted(
+        {p.nome.strip() for p in pessoas_todas if p.nome and p.nome.strip()},
+        key=lambda x: x.lower(),
+    )
     
     return render_template('contas_fixas.html', 
-        mes=mes, ano=ano, contas=contas, totais=totais, saldos=saldos, beneficios=beneficios, nomes_pessoas=nomes_pessoas)
+        mes=mes, ano=ano, contas=contas, totais=totais, nomes_pessoas=nomes_pessoas)
 
 
 @app.route('/pessoas', methods=['GET', 'POST'])
@@ -720,11 +725,6 @@ def pessoas():
             return redirect(url_for('pessoas', mes=mes, ano=ano))
     
     pessoas_list = pessoas_service.listar_pessoas(only_ativas=False) # Listar todas as pessoas para gerenciamento
-    saldos_por_nome = {
-        s.nome.strip().lower(): s
-        for s in receita_service.listar_saldos()
-        if s.nome and s.nome.strip()
-    }
     totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(
         mes, ano, mes_cartao_alt, ano_cartao_alt
     )
@@ -734,13 +734,6 @@ def pessoas():
         total_mes = float(info["total_mes"])
         total_pago = float(info["total_pago"])
         saldo_pend = float(info["saldo_pendente"])
-
-        # Para pessoas padrão, exibe o saldo real da conta (Receitas) no cadastro.
-        if p.padrao:
-            saldo_padrao = saldos_por_nome.get((p.nome or "").strip().lower())
-            total_mes = float(saldo_padrao.saldo_atual) if saldo_padrao else 0.0
-            total_pago = 0.0
-            saldo_pend = 0.0
 
         resumos.append({
             'pessoa': p,

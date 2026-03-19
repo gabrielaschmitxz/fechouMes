@@ -6,10 +6,6 @@ from typing import List, Tuple, Dict
 from finance_app.database import get_connection
 from finance_app.models import ContaFixa
 
-
-ORIGENS_DESCONTO_VALIDAS = {"beneficio", "lancamento_conta"}
-
-
 def _normalizar_data_iso(data_str: str | None) -> str | None:
     valor = (data_str or "").strip()
     if not valor:
@@ -24,17 +20,6 @@ def _normalizar_data_iso(data_str: str | None) -> str | None:
 def mes_ano_atual() -> Tuple[int, int]:
     hoje = date.today()
     return hoje.month, hoje.year
-
-
-def _normalizar_desconto_origem(origem: str | None) -> str | None:
-    valor = (origem or "").strip().lower()
-    if not valor:
-        return None
-    if valor not in ORIGENS_DESCONTO_VALIDAS:
-        return None
-    return valor
-
-
 def gerar_contas_fixas_mes_atual(conn=None) -> None:
     """Gera automaticamente, no inÃ­cio do mÃªs, as contas fixas baseadas no mÃªs anterior.
 
@@ -66,8 +51,8 @@ def gerar_contas_fixas_mes_atual(conn=None) -> None:
     # Pega a última versão de cada conta antes do mês atual.
     cur.execute(
         """
-        SELECT c1.nome, c1.categoria, c1.valor_padrao, c1.desconto_pessoa_nome, c1.desconto_origem,
-               c1.desconto_receita_extra_id, c1.vencimento_dia, c1.vencimento_data, c1.data_fim
+        SELECT c1.nome, c1.categoria, c1.valor_padrao, c1.desconto_pessoa_nome,
+               c1.vencimento_dia, c1.vencimento_data, c1.data_fim
         FROM contas_fixas c1
         INNER JOIN (
             SELECT nome, MAX(ano_referencia * 100 + mes_referencia) AS yyyymm
@@ -108,8 +93,8 @@ def gerar_contas_fixas_mes_atual(conn=None) -> None:
                 r["categoria"],
                 r["valor_padrao"],
                 r["desconto_pessoa_nome"],
-                r["desconto_origem"],
-                r["desconto_receita_extra_id"],
+                None,
+                None,
                 r["vencimento_dia"],
                 r["vencimento_data"],
                 mes_atual,
@@ -142,10 +127,8 @@ def criar_conta_fixa(
     vencimento_data = _normalizar_data_iso(vencimento_data)
     data_fim = _normalizar_data_iso(data_fim)
     desconto_pessoa_nome = (desconto_pessoa_nome or "").strip() or None
-    desconto_origem = _normalizar_desconto_origem(desconto_origem)
-    desconto_receita_extra_id = int(desconto_receita_extra_id) if desconto_receita_extra_id else None
-    if desconto_origem != "beneficio":
-        desconto_receita_extra_id = None
+    desconto_origem = None
+    desconto_receita_extra_id = None
 
     conn = get_connection()
     cur = conn.cursor()
@@ -222,10 +205,8 @@ def atualizar_conta_fixa(
     vencimento_data = _normalizar_data_iso(vencimento_data)
     data_fim = _normalizar_data_iso(data_fim)
     desconto_pessoa_nome = (desconto_pessoa_nome or "").strip() or None
-    desconto_origem = _normalizar_desconto_origem(desconto_origem)
-    desconto_receita_extra_id = int(desconto_receita_extra_id) if desconto_receita_extra_id else None
-    if desconto_origem != "beneficio":
-        desconto_receita_extra_id = None
+    desconto_origem = None
+    desconto_receita_extra_id = None
 
     vencimento_dia = None
     if vencimento_data:
@@ -322,50 +303,20 @@ def marcar_conta_como_paga(conta_id: int) -> bool:
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
-        "UPDATE contas_fixas SET status = 'Pago', desconto_aplicado = TRUE WHERE id = ? AND status <> 'Pago';",
+        """
+        UPDATE contas_fixas
+        SET status = 'Pago',
+            desconto_aplicado = TRUE,
+            desconto_origem = NULL,
+            desconto_receita_extra_id = NULL
+        WHERE id = ? AND status <> 'Pago';
+        """,
         (conta_id,),
     )
     ok = cur.rowcount > 0
     conn.commit()
     conn.close()
     return ok
-
-
-def marcar_desconto_como_aplicado(conta_id: int) -> None:
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE contas_fixas SET desconto_aplicado = TRUE WHERE id = ?;", (conta_id,))
-    conn.commit()
-    conn.close()
-
-
-def listar_contas_pagas_com_desconto_pendente() -> List[ContaFixa]:
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, nome, categoria, valor_padrao, desconto_pessoa_nome, desconto_origem, desconto_receita_extra_id, desconto_aplicado,
-               vencimento_dia, vencimento_data, mes_referencia, ano_referencia, status, data_fim
-        FROM contas_fixas
-        WHERE status = 'Pago'
-          AND COALESCE(desconto_aplicado, FALSE) = FALSE
-          AND desconto_origem IS NOT NULL
-          AND desconto_pessoa_nome IS NOT NULL
-          AND valor_padrao IS NOT NULL
-          AND valor_padrao > 0
-        ORDER BY id ASC;
-        """
-    )
-    rows = cur.fetchall()
-    conn.close()
-    contas: List[ContaFixa] = []
-    for r in rows:
-        data = dict(r)
-        data["desconto_aplicado"] = bool(data.get("desconto_aplicado"))
-        contas.append(ContaFixa(**data))
-    return contas
-
-
 def calcular_totais_contas_fixas(
     mes: int,
     ano: int,
