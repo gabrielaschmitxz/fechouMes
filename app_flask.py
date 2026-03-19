@@ -490,25 +490,24 @@ def contas_fixas():
         
         elif action == 'marcar_pago':
             conta_id = int(request.form.get('conta_id', 0))
-            conta = contas_service.obter_conta_fixa_por_id(conta_id)
-            if not conta:
-                flash('Conta não encontrada.', 'warning')
-                return redirect(url_for('contas_fixas', mes=mes, ano=ano))
-
             foi_atualizada = contas_service.marcar_conta_como_paga(conta_id)
             if foi_atualizada:
                 flash('Conta marcada como paga com sucesso.', 'success')
             else:
-                flash('A conta já estava marcada como paga.', 'info')
+                flash('Conta não encontrada ou já estava marcada como paga.', 'info')
             return redirect(url_for('contas_fixas', mes=mes, ano=ano))
     
-    # Gera automaticamente do mÃªs atual
-    contas_service.gerar_contas_fixas_mes_atual()
-    contas = contas_service.listar_contas_fixas(mes, ano)
-    totais = contas_service.calcular_totais_contas_fixas(mes, ano)
-    saldos = receita_service.listar_saldos()
-    beneficios = [e for e in receita_service.listar_receitas_extras() if e.categoria == 'beneficio']
-    pessoas_todas = pessoas_service.listar_pessoas(only_ativas=False)
+    conn = get_connection()
+    try:
+        # Gera automaticamente do mÃªs atual usando a mesma conexÃ£o do carregamento da tela.
+        contas_service.gerar_contas_fixas_mes_atual(conn=conn)
+        contas = contas_service.listar_contas_fixas(mes, ano, conn=conn)
+        totais = contas_service.calcular_totais_contas_fixas(mes, ano, contas=contas)
+        saldos = receita_service.listar_saldos(conn=conn)
+        beneficios = [e for e in receita_service.listar_receitas_extras(conn=conn) if e.categoria == 'beneficio']
+        pessoas_todas = pessoas_service.listar_pessoas(only_ativas=False, conn=conn)
+    finally:
+        conn.close()
     nomes_pessoas = sorted({p.nome.strip() for p in pessoas_todas if p.nome and p.nome.strip()})
     for s in saldos:
         nome = s.nome.strip()

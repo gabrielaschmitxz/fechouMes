@@ -7,9 +7,10 @@ from finance_app.database import USE_POSTGRES, get_connection
 from finance_app.models import Pessoa
 
 
-def listar_pessoas(only_ativas: bool = True) -> List[Pessoa]:
-    conn = get_connection()
-    cur = conn.cursor()
+def listar_pessoas(only_ativas: bool = True, conn=None) -> List[Pessoa]:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
     if only_ativas: # Removed get_cursor(conn) and used conn.cursor()
         cur.execute(
             "SELECT id, nome, ativo, padrao FROM pessoas WHERE ativo = TRUE ORDER BY LOWER(nome);"
@@ -17,7 +18,8 @@ def listar_pessoas(only_ativas: bool = True) -> List[Pessoa]:
     else:
         cur.execute("SELECT id, nome, ativo, padrao FROM pessoas ORDER BY LOWER(nome);")
     rows = cur.fetchall()
-    conn.close()
+    if close_conn:
+        conn_local.close()
     return [
         Pessoa(id=r["id"], nome=r["nome"], ativo=bool(r["ativo"]), padrao=bool(r["padrao"]))
         for r in rows

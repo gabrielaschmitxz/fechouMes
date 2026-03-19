@@ -7,12 +7,14 @@ from finance_app.database import get_connection
 from finance_app.models import ReceitaSaldo, ReceitaExtra, ReceitaLancamento
 
 
-def listar_saldos() -> List[ReceitaSaldo]:
-    conn = get_connection()
-    cur = conn.cursor()
+def listar_saldos(conn=None) -> List[ReceitaSaldo]:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
     cur.execute("SELECT id, nome, saldo_atual FROM receitas_saldos ORDER BY nome;")
     rows = cur.fetchall()
-    conn.close()
+    if close_conn:
+        conn_local.close()
     return [ReceitaSaldo(**dict(r)) for r in rows]
 
 
@@ -101,14 +103,16 @@ def registrar_salario_recebido(
     )
 
 
-def listar_receitas_extras() -> List[ReceitaExtra]:
-    conn = get_connection()
-    cur = conn.cursor()
+def listar_receitas_extras(conn=None) -> List[ReceitaExtra]:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
     cur.execute(
         "SELECT id, descricao, valor_padrao, categoria, data_recebimento FROM receitas_extras ORDER BY descricao;"
     )
     rows = cur.fetchall()
-    conn.close()
+    if close_conn:
+        conn_local.close()
     return [ReceitaExtra(**dict(r)) for r in rows]
 
 

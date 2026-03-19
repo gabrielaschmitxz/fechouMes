@@ -35,7 +35,7 @@ def _normalizar_desconto_origem(origem: str | None) -> str | None:
     return valor
 
 
-def gerar_contas_fixas_mes_atual() -> None:
+def gerar_contas_fixas_mes_atual(conn=None) -> None:
     """Gera automaticamente, no inÃ­cio do mÃªs, as contas fixas baseadas no mÃªs anterior.
 
     Regra de data_fim: se a data_fim for anterior ao primeiro dia do mÃªs atual, nÃ£o gera.
@@ -46,8 +46,9 @@ def gerar_contas_fixas_mes_atual() -> None:
     else:
         mes_anterior, ano_anterior = mes_atual - 1, ano_atual
 
-    conn = get_connection()
-    cur = conn.cursor()
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
 
     # Verifica se jÃ¡ existem contas para o mÃªs atual
     cur.execute(
@@ -58,7 +59,8 @@ def gerar_contas_fixas_mes_atual() -> None:
         (mes_atual, ano_atual),
     )
     if cur.fetchone()["c"] > 0:
-        conn.close()
+        if close_conn:
+            conn_local.close()
         return
 
     # Pega a última versão de cada conta antes do mês atual.
@@ -116,8 +118,9 @@ def gerar_contas_fixas_mes_atual() -> None:
             ),
         )
 
-    conn.commit()
-    conn.close()
+    conn_local.commit()
+    if close_conn:
+        conn_local.close()
 
 
 def criar_conta_fixa(
@@ -177,9 +180,10 @@ def criar_conta_fixa(
     conn.close()
 
 
-def listar_contas_fixas(mes: int, ano: int) -> List[ContaFixa]:
-    conn = get_connection()
-    cur = conn.cursor()
+def listar_contas_fixas(mes: int, ano: int, conn=None) -> List[ContaFixa]:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
     cur.execute(
         """
         SELECT id, nome, categoria, valor_padrao, desconto_pessoa_nome, desconto_origem, desconto_receita_extra_id, desconto_aplicado,
@@ -192,7 +196,8 @@ def listar_contas_fixas(mes: int, ano: int) -> List[ContaFixa]:
         (mes, ano),
     )
     rows = cur.fetchall()
-    conn.close()
+    if close_conn:
+        conn_local.close()
     contas: List[ContaFixa] = []
     for r in rows:
         data = dict(r)
@@ -290,9 +295,10 @@ def excluir_conta_fixa(conta_id: int) -> bool:
     return ok
 
 
-def obter_conta_fixa_por_id(conta_id: int) -> ContaFixa | None:
-    conn = get_connection()
-    cur = conn.cursor()
+def obter_conta_fixa_por_id(conta_id: int, conn=None) -> ContaFixa | None:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
     cur.execute(
         """
         SELECT id, nome, categoria, valor_padrao, desconto_pessoa_nome, desconto_origem, desconto_receita_extra_id, desconto_aplicado,
@@ -303,7 +309,8 @@ def obter_conta_fixa_por_id(conta_id: int) -> ContaFixa | None:
         (conta_id,),
     )
     row = cur.fetchone()
-    conn.close()
+    if close_conn:
+        conn_local.close()
     if not row:
         return None
     data = dict(row)
@@ -359,8 +366,14 @@ def listar_contas_pagas_com_desconto_pendente() -> List[ContaFixa]:
     return contas
 
 
-def calcular_totais_contas_fixas(mes: int, ano: int) -> Dict[str, float]:
-    contas = listar_contas_fixas(mes, ano)
+def calcular_totais_contas_fixas(
+    mes: int,
+    ano: int,
+    contas: List[ContaFixa] | None = None,
+    conn=None,
+) -> Dict[str, float]:
+    if contas is None:
+        contas = listar_contas_fixas(mes, ano, conn=conn)
     total = sum(c.valor_padrao or 0 for c in contas)
     total_pendente = sum(
         (c.valor_padrao or 0) for c in contas if c.status == "Pendente"
