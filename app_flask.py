@@ -1,15 +1,17 @@
-﻿"""AplicaÃ§Ã£o Flask principal para Fechou MÃªs - Controle Financeiro"""
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+"""AplicaÃ§Ã£o Flask principal para Fechou MÃªs - Controle Financeiro"""
+from flask import Flask, render_template, request, redirect, url_for, flash, session, g
 from datetime import datetime
 from decimal import Decimal
+import logging
 import sys
 import os
+import time
 from pathlib import Path
 
 # Adiciona o diretÃ³rio raiz ao path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from finance_app.database import setup_database, get_connection
+from finance_app.database import setup_database, get_connection, USE_POSTGRES
 from finance_app.services import (
     receita_service,
     cartao_service,
@@ -20,9 +22,11 @@ from finance_app.services import (
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
+app.logger.setLevel(logging.INFO)
 
 # Inicializa banco de dados
 setup_database()
+app.logger.info("App iniciada com backend de banco: %s", "postgres" if USE_POSTGRES else "sqlite")
 
 
 def _mes_ano_atual():
@@ -113,6 +117,7 @@ def _to_float(value, default=0.0):
 
 @app.before_request
 def _require_login():
+    g.request_started_at = time.perf_counter()
     if request.path == "/favicon.ico":
         return "", 204
     public_endpoints = {"login", "static"}
@@ -121,6 +126,21 @@ def _require_login():
     if session.get("user_id"):
         return
     return redirect(url_for("login", next=request.path))
+
+
+@app.after_request
+def _log_request_timing(response):
+    started_at = getattr(g, "request_started_at", None)
+    if started_at is not None:
+        elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+        app.logger.info(
+            "%s %s -> %s em %.1fms",
+            request.method,
+            request.path,
+            response.status_code,
+            elapsed_ms,
+        )
+    return response
 
 
 @app.route('/login', methods=['GET', 'POST'])

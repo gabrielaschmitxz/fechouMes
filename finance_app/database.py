@@ -80,8 +80,16 @@ def get_connection() -> ConnectionCompat:
         return ConnectionCompat(conn, postgres=True, from_pool=True)
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    sqlite_timeout = float(os.getenv("SQLITE_TIMEOUT", "30"))
+    conn = sqlite3.connect(DB_PATH, timeout=sqlite_timeout)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute(f"PRAGMA busy_timeout = {int(sqlite_timeout * 1000)};")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+    except sqlite3.DatabaseError:
+        pass
     return ConnectionCompat(conn, postgres=False)
 
 
