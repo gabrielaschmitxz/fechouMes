@@ -354,6 +354,11 @@ def _competencia_conta_fixa(
     return int(mes_referencia), int(ano_referencia)
 
 
+def _descricao_pagamento_parcelada(texto: object | None) -> str:
+    descricao = str(texto or "").strip()
+    return descricao or "Cartão parcelado"
+
+
 def listar_contas_pendentes_pessoa(
     pessoa_id: int,
     mes_referencia: int,
@@ -611,6 +616,7 @@ def listar_contas_status_pessoa_meses(
     base_mes = mes_cartao_referencia if mes_cartao_referencia is not None else refs_unicas[0][0]
     base_ano = ano_cartao_referencia if ano_cartao_referencia is not None else refs_unicas[0][1]
     idx_base = base_ano * 12 + (base_mes - 1)
+    parceladas_adicionadas: set[Tuple[int, int, int]] = set()
     for r in parceladas_ativas:
         item_id = int(r["id"])
         parcela_atual = int(r["parcela_atual"])
@@ -625,6 +631,7 @@ def listar_contas_status_pessoa_meses(
             if parcela_num < parcela_atual or parcela_num > total_parcelas:
                 continue
             pago = ("cartao_parcelada", item_id, m_ref, a_ref) in pagos_keys
+            parceladas_adicionadas.add((item_id, m_ref, a_ref))
             mapa[f"{a_ref}-{m_ref:02d}"].append(
                 {
                     "tipo": "cartao_parcelada",
@@ -636,6 +643,36 @@ def listar_contas_status_pessoa_meses(
                     "pago": pago,
                 }
             )
+
+    # Parceladas já finalizadas ainda podem precisar aparecer em consultas históricas
+    # quando houve pagamento registrado na competência selecionada.
+    cur.execute(
+        f"""
+        SELECT item_id, descricao_item, valor, mes_referencia, ano_referencia
+        FROM pagamentos_terceiros_itens
+        WHERE pessoa_id = ?
+          AND tipo = 'cartao_parcelada'
+          AND ({filtros_ref});
+        """,
+        tuple(params_ref),
+    )
+    for r in cur.fetchall():
+        item_id = int(r["item_id"])
+        m_ref = int(r["mes_referencia"])
+        a_ref = int(r["ano_referencia"])
+        if (item_id, m_ref, a_ref) in parceladas_adicionadas:
+            continue
+        mapa[f"{a_ref}-{m_ref:02d}"].append(
+            {
+                "tipo": "cartao_parcelada",
+                "item_id": item_id,
+                "descricao": _descricao_pagamento_parcelada(r["descricao_item"]),
+                "valor": float(r["valor"]),
+                "mes_referencia": m_ref,
+                "ano_referencia": a_ref,
+                "pago": True,
+            }
+        )
 
     # Cartão à vista nas competências carregadas.
     cur.execute(
@@ -1070,6 +1107,8 @@ def calcular_totais_por_pessoa(
             for r in cur.fetchall()
         }
 
+    parceladas_contabilizadas: set[Tuple[int, int]] = set()
+
     # Parceladas: soma apenas quando houver parcela correspondente ao(s) mês(es) em foco.
     for row in parceladas_ativas:
         pessoa_id = row["pessoa_id"]
@@ -1094,6 +1133,7 @@ def calcular_totais_por_pessoa(
         if conta_no_mes:
             totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
             totals[pessoa_id]["total_mes"] += float(row["valor_parcela"])
+            parceladas_contabilizadas.add((int(pessoa_id), int(row["id"])))
     filtros_cartao = " OR ".join(
         ["(mes_referencia = ? AND ano_referencia = ?)"] * len(competencias_cartao)
     )
@@ -1189,6 +1229,27 @@ def calcular_totais_por_pessoa(
         if parcela_num < parcela_atual or parcela_num > total_parcelas:
             continue
         _add_pago(pid, float(row["valor_parcela"]))
+
+    # Parceladas históricas já finalizadas podem não aparecer mais como ativas, mas o
+    # pagamento do mês consultado continua sendo parte do total daquela pessoa.
+    cur.execute(
+        """
+        SELECT pessoa_id, item_id, valor
+        FROM pagamentos_terceiros_itens
+        WHERE tipo = 'cartao_parcelada'
+          AND mes_referencia = ?
+          AND ano_referencia = ?;
+        """,
+        (mes, ano),
+    )
+    for row in cur.fetchall():
+        pid = int(row["pessoa_id"])
+        item_id = int(row["item_id"])
+        valor = float(row["valor"])
+        if (pid, item_id) not in parceladas_contabilizadas:
+            totals.setdefault(pid, {"total_mes": 0.0, "total_pago": 0.0})
+            totals[pid]["total_mes"] += valor
+            _add_pago(pid, valor)
 
     # Conta fixa paga no mês alvo (status ou item pago), respeitando competência por vencimento.
     for row in contas_fixas_vinculadas:
