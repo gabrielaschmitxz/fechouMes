@@ -12,6 +12,19 @@ def _add_meses(mes: int, ano: int, delta: int) -> Tuple[int, int]:
     return (idx % 12) + 1, idx // 12
 
 
+def _indice_competencia(mes: int, ano: int) -> int:
+    return (int(ano) * 12) + (int(mes) - 1)
+
+
+def _competencia_primeira_parcela(
+    mes_referencia: int,
+    ano_referencia: int,
+    parcela_atual: int,
+) -> Tuple[int, int]:
+    idx_primeira = _indice_competencia(mes_referencia, ano_referencia) - (int(parcela_atual) - 1)
+    return (idx_primeira % 12) + 1, idx_primeira // 12
+
+
 def get_config() -> CartaoConfig:
     conn = get_connection()
     cur = conn.cursor()
@@ -19,7 +32,7 @@ def get_config() -> CartaoConfig:
     row = cur.fetchone()
     conn.close()
     if not row:
-        raise RuntimeError("ConfiguraÃ§Ã£o do cartÃ£o nÃ£o encontrada.")
+        raise RuntimeError("Configuração do cartão não encontrada.")
     data = dict(row)
     data["fatura_paga"] = bool(data["fatura_paga"])
     return CartaoConfig(**data)
@@ -41,13 +54,13 @@ def atualizar_config(limite_total: float, dia_fechamento: int, dia_vencimento: i
 
 
 def mes_ano_fatura_atual(hoje: date | None = None) -> Tuple[int, int]:
-    """Determina o mÃªs/ano de referÃªncia da fatura atual com base no dia de fechamento."""
+    """Determina o mês/ano de referência da fatura atual com base no dia de fechamento."""
     if hoje is None:
         hoje = date.today()
     cfg = get_config()
     mes = hoje.month
     ano = hoje.year
-    # Compras apÃ³s o fechamento pertencem Ã  prÃ³xima fatura
+    # Compras após o fechamento pertencem à próxima fatura
     if hoje.day > cfg.dia_fechamento:
         if mes == 12:
             mes = 1
@@ -165,14 +178,14 @@ def mes_ano_fatura_em_aberto(hoje: date | None = None) -> Tuple[int, int]:
 
 def calcular_fatura_competencia(mes_ref: int, ano_ref: int) -> Dict[str, float]:
     """Retorna totais da competência informada."""
-    idx_alvo = ano_ref * 12 + (mes_ref - 1)
+    idx_alvo = _indice_competencia(mes_ref, ano_ref)
 
-    # Parceladas: calcula pela competência da parcela, inclusive histórico.
+    # Parceladas: na aba de cartão, mes_inicio/ano_inicio representam a competência da primeira parcela.
     parceladas = listar_parceladas()
     total_parceladas_meu = 0.0
     total_parceladas_terceiros = 0.0
     for p in parceladas:
-        idx_inicio = int(p.ano_inicio) * 12 + (int(p.mes_inicio) - 1)
+        idx_inicio = _indice_competencia(int(p.mes_inicio), int(p.ano_inicio))
         parcela_num = idx_alvo - idx_inicio + 1
         if parcela_num < 1 or parcela_num > int(p.total_parcelas):
             continue
@@ -212,7 +225,7 @@ def calcular_fatura_atual() -> Dict[str, float]:
 def marcar_fatura_como_paga() -> None:
     """Regras:
     - fatura_paga = True
-    - avanÃ§ar mÃªs da fatura (implÃ­cito pela funÃ§Ã£o mes_ano_fatura_atual ao longo do tempo)
+    - avançar mês da fatura (implícito pela função mes_ano_fatura_atual ao longo do tempo)
     - incrementar parcela_atual +1 em todas parceladas ativas
     - se parcela_atual > total_parcelas -> status = 'Finalizada'
     """
@@ -245,7 +258,7 @@ def marcar_fatura_como_paga() -> None:
 
 
 def reabrir_fatura_atual() -> None:
-    """Permite marcar novamente como nÃ£o paga (caso de erro)."""
+    """Permite marcar novamente como não paga (caso de erro)."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("UPDATE cartao_config SET fatura_paga = FALSE WHERE id = 1;")
@@ -296,9 +309,15 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
         item = dict(r)
         total_parcelas = int(item.get("total_parcelas") or 1)
         parcela_atual = int(item.get("parcela_atual") or 1)
-        mes_inicio = int(item.get("mes_inicio") or 1)
-        ano_inicio = int(item.get("ano_inicio") or date.today().year)
         status = str(item.get("status") or "")
+        mes_referencia = int(item.get("mes_inicio") or 1)
+        ano_referencia = int(item.get("ano_inicio") or date.today().year)
+        parcela_referencia = max(1, min(parcela_atual, total_parcelas))
+        mes_inicio, ano_inicio = _competencia_primeira_parcela(
+            mes_referencia,
+            ano_referencia,
+            parcela_referencia,
+        )
 
         for off in range(total_parcelas):
             parcela_exibicao = off + 1

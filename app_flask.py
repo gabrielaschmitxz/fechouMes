@@ -1,4 +1,4 @@
-"""AplicaÃ§Ã£o Flask principal para Fechou MÃªs - Controle Financeiro"""
+"""Aplicação Flask principal para Fechou Mês - Controle Financeiro"""
 from flask import Flask, render_template, request, redirect, url_for, flash, session, g
 from datetime import datetime
 from decimal import Decimal
@@ -8,7 +8,7 @@ import os
 import time
 from pathlib import Path
 
-# Adiciona o diretÃ³rio raiz ao path
+# Adiciona o diretório raiz ao path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from finance_app.database import setup_database, get_connection, USE_POSTGRES
@@ -29,7 +29,7 @@ app.logger.info("App iniciada com backend de banco: %s", "postgres" if USE_POSTG
 
 
 def _mes_ano_atual():
-    """Retorna mÃªs e ano atuais"""
+    """Retorna mês e ano atuais"""
     hoje = datetime.now()
     return hoje.month, hoje.year
 
@@ -185,22 +185,32 @@ def index():
 
 @app.route('/dashboard')
 def dashboard():
-    """PÃ¡gina principal do dashboard focada no cartÃ£o."""
+    """Página principal do dashboard focada no cartão."""
     cfg = cartao_service.get_config()
-    fatura_info = cartao_service.calcular_fatura_atual()
+    mes_aberto, ano_aberto = cartao_service.mes_ano_fatura_em_aberto()
+    mes_ref, ano_ref = _normalizar_competencia(
+        request.args.get('mes'),
+        request.args.get('ano'),
+        mes_aberto,
+        ano_aberto,
+    )
+    fatura_info = cartao_service.calcular_fatura_competencia(mes_ref, ano_ref)
     limite_total = _to_float(cfg.limite_total)
     total_fatura = _to_float(fatura_info.get("total_geral"))
     limite_disponivel = limite_total - total_fatura
     percentual_utilizado = (total_fatura / limite_total * 100.0) if limite_total > 0 else 0.0
+    competencias = _listar_competencias(mes_aberto, ano_aberto)
+    anos_competencia = sorted({c["ano"] for c in competencias})
 
     return render_template('dashboard.html',
         fatura_info=fatura_info,
         limite_total=limite_total,
         limite_disponivel=limite_disponivel,
         percentual_utilizado=percentual_utilizado,
-        dia_fechamento=cfg.dia_fechamento,
-        dia_vencimento=cfg.dia_vencimento,
-        fatura_paga=cfg.fatura_paga,
+        competencias=competencias,
+        anos_competencia=anos_competencia,
+        mes_ref=mes_ref,
+        ano_ref=ano_ref,
     )
 
 
@@ -212,10 +222,14 @@ def receitas():
 
 @app.route('/cartao', methods=['GET', 'POST'])
 def cartao():
-    """PÃ¡gina do cartÃ£o de crÃ©dito"""
+    """Página do cartão de crédito"""
     cfg = cartao_service.get_config()
     mes_fatura_aberta, ano_fatura_aberta = cartao_service.mes_ano_fatura_em_aberto()
     mes_comp_padrao, ano_comp_padrao = mes_fatura_aberta, ano_fatura_aberta
+    sort_by = (request.args.get('sort_by') or '').strip().lower()
+    sort_dir = (request.args.get('sort_dir') or 'asc').strip().lower()
+    if sort_dir not in {'asc', 'desc'}:
+        sort_dir = 'asc'
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -225,12 +239,12 @@ def cartao():
             dia_fech = int(request.form.get('dia_fechamento'))
             dia_venc = int(request.form.get('dia_vencimento'))
             cartao_service.atualizar_config(limite, dia_fech, dia_venc)
-            flash('ConfiguraÃ§Ã£o atualizada.', 'success')
+            flash('Configuração atualizada.', 'success')
             return redirect(url_for('cartao'))
         
         elif action == 'marcar_paga':
             cartao_service.marcar_fatura_como_paga()
-            flash('Fatura marcada como paga e parcelas avanÃ§adas.', 'success')
+            flash('Fatura marcada como paga e parcelas avançadas.', 'success')
             return redirect(url_for('cartao'))
         
         elif action == 'reabrir':
@@ -255,7 +269,7 @@ def cartao():
             )
             
             if not descricao or valor_compra <= 0:
-                flash('Informe descriÃ§Ã£o e valor maior que zero.', 'warning')
+                flash('Informe descrição e valor maior que zero.', 'warning')
                 return redirect(url_for('cartao'))
             if not avista:
                 if total_parcelas < 1:
@@ -364,6 +378,12 @@ def cartao():
         mes_fatura_aberta,
         ano_fatura_aberta,
     )
+    mes_lancamento_exibicao, ano_lancamento_exibicao = _normalizar_competencia(
+        request.args.get('mes_lancamento'),
+        request.args.get('ano_lancamento'),
+        mes_fatura_exibicao,
+        ano_fatura_exibicao,
+    )
     info = cartao_service.calcular_fatura_competencia(mes_fatura_exibicao, ano_fatura_exibicao)
     pessoas = pessoas_service.listar_pessoas()
     lancamentos_todos = cartao_service.listar_todos_lancamentos()
@@ -388,8 +408,11 @@ def cartao():
     for idx, l in enumerate(lancamentos_todos):
         l["ui_key"] = f"{l['tipo']}-{int(l['id'])}-{idx}"
     grupos_por_chave = {}
+    competencia_minima_lancamentos = (2026, 3)
     for l in lancamentos_todos:
         chave = (int(l["ano_ref"]), int(l["mes_ref"]))
+        if chave < competencia_minima_lancamentos:
+            continue
         grupo = grupos_por_chave.get(chave)
         if grupo is None:
             ano_ref, mes_ref = chave
@@ -401,10 +424,26 @@ def cartao():
             grupos_por_chave[chave] = grupo
         grupo["lancamentos"].append(l)
 
+    if sort_by == 'pessoa':
+        for grupo in grupos_por_chave.values():
+            grupo["lancamentos"] = sorted(
+                grupo["lancamentos"],
+                key=lambda l: (
+                    (l.get("pessoa_nome") or "").strip().lower(),
+                    (l.get("descricao") or "").strip().lower(),
+                    str(l.get("tipo") or ""),
+                    int(l.get("id") or 0),
+                ),
+                reverse=(sort_dir == 'desc'),
+            )
+
     lancamentos_por_competencia = [
         grupos_por_chave[chave]
-        for chave in sorted(grupos_por_chave.keys(), key=lambda x: (x[0], x[1]))
+        for chave in sorted(grupos_por_chave.keys(), key=lambda x: (x[0], x[1]), reverse=True)
     ]
+    chaves_lancamentos = [grupo["chave"] for grupo in lancamentos_por_competencia]
+    if (ano_lancamento_exibicao, mes_lancamento_exibicao) not in chaves_lancamentos and chaves_lancamentos:
+        ano_lancamento_exibicao, mes_lancamento_exibicao = chaves_lancamentos[0]
     
     return render_template(
         'cartao.html',
@@ -421,11 +460,15 @@ def cartao():
         ano_fatura_aberta=ano_fatura_aberta,
         mes_fatura_exibicao=mes_fatura_exibicao,
         ano_fatura_exibicao=ano_fatura_exibicao,
+        mes_lancamento_exibicao=mes_lancamento_exibicao,
+        ano_lancamento_exibicao=ano_lancamento_exibicao,
         mes_fatura_anterior=mes_fatura_anterior,
         ano_fatura_anterior=ano_fatura_anterior,
         mes_fatura_proxima=mes_fatura_proxima,
         ano_fatura_proxima=ano_fatura_proxima,
         exibindo_fatura_aberta=exibindo_fatura_aberta,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
 
@@ -437,9 +480,13 @@ def gastos_pix():
 
 @app.route('/contas-fixas', methods=['GET', 'POST'])
 def contas_fixas():
-    """PÃ¡gina de contas fixas"""
+    """Página de contas fixas"""
     mes = request.args.get('mes', type=int, default=_mes_ano_atual()[0])
     ano = request.args.get('ano', type=int, default=_mes_ano_atual()[1])
+    sort_by = (request.args.get('sort_by') or '').strip().lower()
+    sort_dir = (request.args.get('sort_dir') or 'asc').strip().lower()
+    if sort_dir not in {'asc', 'desc'}:
+        sort_dir = 'asc'
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -528,25 +575,37 @@ def contas_fixas():
     
     conn = get_connection()
     try:
-        # Gera automaticamente do mÃªs atual usando a mesma conexÃ£o do carregamento da tela.
+        # Gera automaticamente do mês atual usando a mesma conexão do carregamento da tela.
         contas_service.gerar_contas_fixas_mes_atual(conn=conn)
+        contas_service.garantir_contas_casa_competencia(mes, ano, conn=conn)
         contas = contas_service.listar_contas_fixas(mes, ano, conn=conn)
         totais = contas_service.calcular_totais_contas_fixas(mes, ano, contas=contas)
         pessoas_todas = pessoas_service.listar_pessoas(only_ativas=False, conn=conn)
     finally:
         conn.close()
+    if sort_by == 'pessoa':
+        contas = sorted(
+            contas,
+            key=lambda c: (
+                (c.desconto_pessoa_nome or '').strip().lower(),
+                (c.nome or '').strip().lower(),
+                int(c.id),
+            ),
+            reverse=(sort_dir == 'desc'),
+        )
     nomes_pessoas = sorted(
         {p.nome.strip() for p in pessoas_todas if p.nome and p.nome.strip()},
         key=lambda x: x.lower(),
     )
     
     return render_template('contas_fixas.html', 
-        mes=mes, ano=ano, contas=contas, totais=totais, nomes_pessoas=nomes_pessoas)
+        mes=mes, ano=ano, contas=contas, totais=totais, nomes_pessoas=nomes_pessoas,
+        sort_by=sort_by, sort_dir=sort_dir)
 
 
 @app.route('/pessoas', methods=['GET', 'POST'])
 def pessoas():
-    """PÃ¡gina de pessoas (terceiros)"""
+    """Página de pessoas (terceiros)"""
     mes_atual, ano_atual = _mes_ano_atual()
     mes_raw = request.args.get('mes')
     ano_raw = request.args.get('ano')
@@ -584,13 +643,13 @@ def pessoas():
             pessoa_id = int(request.form.get('pessoa_id'))
             pessoa = pessoas_service.get_pessoa_by_id(pessoa_id)
             if not pessoa:
-                flash('Pessoa nÃ£o encontrada.', 'warning')
+                flash('Pessoa não encontrada.', 'warning')
             else:
                 try:
                     pessoas_service.excluir_pessoa(pessoa_id)
-                    flash('Pessoa excluÃ­da com sucesso.', 'success')
+                    flash('Pessoa excluída com sucesso.', 'success')
                 except Exception:
-                    flash('NÃ£o foi possÃ­vel excluir. A pessoa pode ter registros vinculados.', 'warning')
+                    flash('Não foi possível excluir. A pessoa pode ter registros vinculados.', 'warning')
             return redirect(url_for('pessoas', mes=mes, ano=ano))
 
         
@@ -725,15 +784,31 @@ def pessoas():
             return redirect(url_for('pessoas', mes=mes, ano=ano))
     
     pessoas_list = pessoas_service.listar_pessoas(only_ativas=False) # Listar todas as pessoas para gerenciamento
+    prioridades_nome = {"aila": 1, "raynne": 2}
+
+    def _ordem_pessoa(p):
+        nome_norm = (p.nome or "").strip().lower()
+        if p.padrao:
+            return (0, 0, int(p.id))
+        if nome_norm in prioridades_nome:
+            return (1, prioridades_nome[nome_norm], int(p.id))
+        return (2, 0, int(p.id))
+
+    pessoas_list = sorted(pessoas_list, key=_ordem_pessoa)
     totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(
         mes, ano, mes_cartao_alt, ano_cartao_alt
     )
     resumos = []
     for p in pessoas_list:
-        info = totais_por_pessoa.get(p.id, {"total_mes": 0.0, "total_pago": 0.0, "saldo_pendente": 0.0})
-        total_mes = float(info["total_mes"])
-        total_pago = float(info["total_pago"])
-        saldo_pend = float(info["saldo_pendente"])
+        if p.padrao:
+            total_mes = 0.0
+            total_pago = 0.0
+            saldo_pend = 0.0
+        else:
+            info = totais_por_pessoa.get(p.id, {"total_mes": 0.0, "total_pago": 0.0, "saldo_pendente": 0.0})
+            total_mes = float(info["total_mes"])
+            total_pago = float(info["total_pago"])
+            saldo_pend = float(info["saldo_pendente"])
 
         resumos.append({
             'pessoa': p,
@@ -741,9 +816,18 @@ def pessoas():
             'total_pago': total_pago,
             'saldo_pend': saldo_pend
         })
-    
-    total_mes_geral = sum(float(info.get("total_mes", 0.0)) for info in totais_por_pessoa.values())
-    total_pago_geral = sum(float(info.get("total_pago", 0.0)) for info in totais_por_pessoa.values())
+
+    ids_padrao = {p.id for p in pessoas_list if p.padrao}
+    total_mes_geral = sum(
+        float(info.get("total_mes", 0.0))
+        for pid, info in totais_por_pessoa.items()
+        if pid not in ids_padrao
+    )
+    total_pago_geral = sum(
+        float(info.get("total_pago", 0.0))
+        for pid, info in totais_por_pessoa.items()
+        if pid not in ids_padrao
+    )
     saldo_pend_geral = total_mes_geral - total_pago_geral
 
     pessoas_ativas = [p for p in pessoas_list if p.ativo and not p.padrao]
@@ -763,6 +847,8 @@ def pessoas():
             )
             meses_previsao = list(previsao.get("meses", []))
             chaves_com_contas = set()
+            chave_mes_atual = f"{ano}-{mes:02d}"
+            chaves_com_contas.add(chave_mes_atual)
             idx_limite = (ano * 12) + (mes - 1) + 11
             for mref in meses_previsao:
                 m_ref = int(mref["mes"])
@@ -809,6 +895,28 @@ def pessoas():
             mapa_mes_otimizado = pessoas_service.listar_contas_status_pessoa_meses(
                 p.id, refs, mes_cartao_alt, ano_cartao_alt, conn=conn_pessoa
             )
+            if chave_mes_atual not in chaves_existentes:
+                itens_mes_atual = mapa_mes_otimizado.get(chave_mes_atual, [])
+                total_mes_atual = sum(float(item.get("valor", 0.0)) for item in itens_mes_atual)
+                meses_previsao.append(
+                    {
+                        "mes": mes,
+                        "ano": ano,
+                        "total": total_mes_atual,
+                        "itens": [
+                            {
+                                "descricao": str(item.get("descricao", "")),
+                                "valor": float(item.get("valor", 0.0)),
+                            }
+                            for item in itens_mes_atual
+                        ],
+                    }
+                )
+                meses_previsao.sort(key=lambda x: (int(x["ano"]), int(x["mes"])))
+                previsao["meses"] = meses_previsao
+                total_contas_previsto = sum(float(m.get("total", 0.0)) for m in meses_previsao)
+                previsao["total_geral"] = total_contas_previsto
+                previsao["total_geral_liquido"] = max(total_contas_previsto - total_descontos_previsto, 0.0)
             for mref in previsao.get("meses", []):
                 m = int(mref["mes"])
                 a = int(mref["ano"])

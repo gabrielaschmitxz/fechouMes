@@ -99,9 +99,9 @@
             <div class="row form-row">
                 <div class="col-3">
                     <div class="form-group">
-                        <label>Descontar de</label>
+                        <label>Pessoa</label>
                         <select name="desconto_pessoa_nome">
-                            <option value="">(Sem desconto)</option>
+                            <option value="">(Sem pessoa)</option>
                             {% for nome_pessoa in nomes_pessoas %}
                             <option value="{{ nome_pessoa }}">{{ nome_pessoa }}</option>
                             {% endfor %}
@@ -133,7 +133,12 @@
                 <th>Valor</th>
                 <th>Vencimento</th>
                 <th>Competência</th>
-                <th>Desconto</th>
+                <th>
+                    {% set pessoa_sort_dir = 'desc' if sort_by == 'pessoa' and sort_dir == 'asc' else 'asc' %}
+                    <a href="{{ url_for('contas_fixas', mes=mes, ano=ano, sort_by='pessoa', sort_dir=pessoa_sort_dir) }}" style="color: inherit; text-decoration: none;">
+                        Pessoa{% if sort_by == 'pessoa' %} ^{% endif %}
+                    </a>
+                </th>
                 <th>Data fim</th>
                 <th>Status</th>
                 <th>Ações</th>
@@ -250,9 +255,9 @@
                         <div class="row form-row">
                             <div class="col-2">
                                 <div class="form-group">
-                                    <label>Descontar de</label>
+                                    <label>Pessoa</label>
                                     <select name="desconto_pessoa_nome">
-                                        <option value="" {% if not c.desconto_pessoa_nome %}selected{% endif %}>(Sem desconto)</option>
+                                        <option value="" {% if not c.desconto_pessoa_nome %}selected{% endif %}>(Sem pessoa)</option>
                                         {% for nome_pessoa in nomes_pessoas %}
                                         <option value="{{ nome_pessoa }}" {% if c.desconto_pessoa_nome == nome_pessoa %}selected{% endif %}>{{ nome_pessoa }}</option>
                                         {% endfor %}

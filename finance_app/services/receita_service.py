@@ -91,7 +91,7 @@ def registrar_salario_recebido(
 ) -> None:
     saldo = obter_saldo_por_nome(nome_pessoa)
     if not saldo:
-        raise ValueError(f"Pessoa '{nome_pessoa}' nÃ£o encontrada em receitas_saldos.")
+        raise ValueError(f"Pessoa '{nome_pessoa}' não encontrada em receitas_saldos.")
     atualizar_saldo(saldo.id, valor)
     _registrar_lancamento(
         saldo.id,

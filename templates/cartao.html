@@ -54,6 +54,33 @@
 <!-- Fatura Atual -->
 <section class="cartao-section cartao-section-fatura">
 <div class="section-title">Fatura</div>
+<form method="GET" style="margin: 0 0 0.85rem;">
+    <div class="row form-row" style="align-items: end;">
+        <div class="col-3">
+            <div class="form-group">
+                <label>Competência (mês)</label>
+                <select name="mes_fatura">
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == mes_fatura_exibicao %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-2">
+            <div class="form-group">
+                <label>Competência (ano)</label>
+                <select name="ano_fatura">
+                    {% for a in anos_competencia %}
+                        <option value="{{ a }}" {% if a == ano_fatura_exibicao %}selected{% endif %}>{{ a }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-2 form-action-col">
+            <button type="submit" class="btn btn-primary btn-sm">Aplicar</button>
+        </div>
+    </div>
+</form>
 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: -0.2rem 0 0.75rem;">
     <a class="btn btn-secondary btn-sm" href="{{ url_for('cartao', mes_fatura=mes_fatura_anterior, ano_fatura=ano_fatura_anterior) }}">Mês anterior</a>
     {% if not exibindo_fatura_aberta %}
@@ -204,7 +231,7 @@
     <ul class="nav nav-tabs cartao-tabs" role="tablist" style="margin-bottom: 0.75rem;">
         {% for grupo in lancamentos_por_competencia %}
         <li class="nav-item">
-            <a class="nav-link {% if loop.first %}active{% endif %}" data-toggle="tab" href="#tab-competencia-{{ loop.index }}" role="tab">
+            <a class="nav-link {% if grupo.chave == (ano_lancamento_exibicao, mes_lancamento_exibicao) %}active{% endif %}" data-toggle="tab" href="#tab-competencia-{{ loop.index }}" role="tab">
                 {{ grupo.titulo }}
             </a>
         </li>
@@ -212,7 +239,7 @@
     </ul>
     <div class="tab-content cartao-tab-content">
         {% for grupo in lancamentos_por_competencia %}
-        <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="tab-competencia-{{ loop.index }}" role="tabpanel">
+        <div class="tab-pane fade {% if grupo.chave == (ano_lancamento_exibicao, mes_lancamento_exibicao) %}show active{% endif %}" id="tab-competencia-{{ loop.index }}" role="tabpanel">
             <div class="table table-blue" style="margin-bottom: 1rem;">
                 <table>
                     <thead>
@@ -221,7 +248,11 @@
                             <th>Descrição</th>
                             <th>Valor</th>
                             <th>Parcelas</th>
-                            <th>Pessoa</th>
+                            <th>
+                                <a href="{{ url_for('cartao', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lancamento_exibicao, ano_lancamento=ano_lancamento_exibicao, sort_by='pessoa', sort_dir='desc' if sort_by == 'pessoa' and sort_dir == 'asc' else 'asc') }}" style="color: inherit; text-decoration: none;">
+                                    Pessoa ^
+                                </a>
+                            </th>
                             <th>Competência</th>
                             <th>Ações</th>
                         </tr>
@@ -366,4 +397,3 @@ function toggleParcelas() {
 toggleParcelas();
 </script>
 {% endblock %}
-

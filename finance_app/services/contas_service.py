@@ -1,10 +1,13 @@
 ﻿from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date
 from typing import List, Tuple, Dict
 
 from finance_app.database import get_connection
 from finance_app.models import ContaFixa
+
+_CATEGORIAS_CASA_RECORRENTES = {"energia", "gás", "gas", "aluguel", "telefone", "internet"}
 
 def _normalizar_data_iso(data_str: str | None) -> str | None:
     valor = (data_str or "").strip()
@@ -20,10 +23,137 @@ def _normalizar_data_iso(data_str: str | None) -> str | None:
 def mes_ano_atual() -> Tuple[int, int]:
     hoje = date.today()
     return hoje.month, hoje.year
-def gerar_contas_fixas_mes_atual(conn=None) -> None:
-    """Gera automaticamente, no inÃ­cio do mÃªs, as contas fixas baseadas no mÃªs anterior.
 
-    Regra de data_fim: se a data_fim for anterior ao primeiro dia do mÃªs atual, nÃ£o gera.
+
+def _indice_competencia(mes: int, ano: int) -> int:
+    return (int(ano) * 12) + (int(mes) - 1)
+
+
+def _competencias_ate_data_fim(mes: int, ano: int, data_fim: str | None) -> List[Tuple[int, int]]:
+    if not data_fim:
+        return [(int(mes), int(ano))]
+    try:
+        dt_fim = date.fromisoformat(data_fim)
+    except ValueError:
+        return [(int(mes), int(ano))]
+
+    idx_inicio = _indice_competencia(mes, ano)
+    idx_fim = _indice_competencia(dt_fim.month, dt_fim.year)
+    if idx_fim < idx_inicio:
+        return [(int(mes), int(ano))]
+
+    competencias: List[Tuple[int, int]] = []
+    for idx in range(idx_inicio, idx_fim + 1):
+        competencias.append(((idx % 12) + 1, idx // 12))
+    return competencias
+
+
+def _vencimento_data_competencia(vencimento_data: str | None, mes: int, ano: int) -> str | None:
+    if not vencimento_data:
+        return None
+    try:
+        dt_base = date.fromisoformat(vencimento_data)
+    except ValueError:
+        return None
+    dia = min(dt_base.day, monthrange(int(ano), int(mes))[1])
+    return date(int(ano), int(mes), dia).isoformat()
+
+
+def _categoria_casa_recorrente(categoria: str | None) -> bool:
+    return (categoria or "").strip().lower() in _CATEGORIAS_CASA_RECORRENTES
+
+
+def _valor_conta_casa_competencia(categoria: str | None, valor_padrao: float | None) -> float | None:
+    categoria_normalizada = (categoria or "").strip().lower()
+    if categoria_normalizada in {"gás", "gas"}:
+        return 0.0
+    return valor_padrao
+
+
+def _remover_duplicatas_contas_casa_competencia(cur, mes: int, ano: int) -> None:
+    cur.execute(
+        """
+        SELECT MIN(id) AS id_manter, nome, COALESCE(categoria, '') AS categoria,
+               COALESCE(desconto_pessoa_nome, '') AS desconto_pessoa_nome,
+               COALESCE(CAST(vencimento_data AS TEXT), '') AS vencimento_data,
+               COALESCE(valor_padrao, 0) AS valor_padrao,
+               COUNT(*) AS qtd
+        FROM contas_fixas
+        WHERE mes_referencia = ? AND ano_referencia = ?
+          AND LOWER(COALESCE(categoria, '')) IN ('energia', 'gás', 'gas', 'aluguel', 'telefone', 'internet')
+        GROUP BY nome, COALESCE(categoria, ''), COALESCE(desconto_pessoa_nome, ''),
+                 COALESCE(CAST(vencimento_data AS TEXT), ''), COALESCE(valor_padrao, 0)
+        HAVING COUNT(*) > 1;
+        """,
+        (int(mes), int(ano)),
+    )
+    grupos = cur.fetchall()
+    for grupo in grupos:
+        cur.execute(
+            """
+            DELETE FROM contas_fixas
+            WHERE mes_referencia = ? AND ano_referencia = ?
+              AND id <> ?
+              AND nome = ?
+              AND COALESCE(categoria, '') = ?
+              AND COALESCE(desconto_pessoa_nome, '') = ?
+              AND COALESCE(CAST(vencimento_data AS TEXT), '') = ?
+              AND COALESCE(valor_padrao, 0) = ?;
+            """,
+            (
+                int(mes),
+                int(ano),
+                int(grupo["id_manter"]),
+                grupo["nome"],
+                grupo["categoria"],
+                grupo["desconto_pessoa_nome"],
+                grupo["vencimento_data"],
+                grupo["valor_padrao"],
+            ),
+        )
+
+
+def _inserir_conta_fixa(
+    cur,
+    nome: str,
+    categoria: str | None,
+    valor_padrao: float | None,
+    desconto_pessoa_nome: str | None,
+    desconto_origem: str | None,
+    desconto_receita_extra_id: int | None,
+    vencimento_data: str | None,
+    vencimento_dia: int | None,
+    mes: int,
+    ano: int,
+    data_fim: str | None,
+    status: str = "Pendente",
+) -> None:
+    cur.execute(
+        """
+        INSERT INTO contas_fixas
+        (nome, categoria, valor_padrao, desconto_pessoa_nome, desconto_origem, desconto_receita_extra_id, desconto_aplicado,
+         vencimento_dia, vencimento_data, mes_referencia, ano_referencia, status, data_fim)
+        VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, ?, ?);
+        """,
+        (
+            nome,
+            categoria,
+            valor_padrao,
+            desconto_pessoa_nome,
+            desconto_origem,
+            desconto_receita_extra_id,
+            vencimento_dia,
+            vencimento_data,
+            int(mes),
+            int(ano),
+            status,
+            data_fim,
+        ),
+    )
+def gerar_contas_fixas_mes_atual(conn=None) -> None:
+    """Gera automaticamente, no início do mês, as contas fixas baseadas no mês anterior.
+
+    Regra de data_fim: se a data_fim for anterior ao primeiro dia do mês atual, não gera.
     """
     mes_atual, ano_atual = mes_ano_atual()
     if mes_atual == 1:
@@ -35,7 +165,7 @@ def gerar_contas_fixas_mes_atual(conn=None) -> None:
     conn_local = conn or get_connection()
     cur = conn_local.cursor()
 
-    # Verifica se jÃ¡ existem contas para o mÃªs atual
+    # Verifica se já existem contas para o mês atual
     cur.execute(
         """
         SELECT COUNT(*) AS c FROM contas_fixas
@@ -78,7 +208,7 @@ def gerar_contas_fixas_mes_atual(conn=None) -> None:
             except ValueError:
                 fim = None
             if fim and fim < date(ano_atual, mes_atual, 1):
-                # NÃ£o gerar para meses apÃ³s a data_fim
+                # Não gerar para meses após a data_fim
                 continue
 
         cur.execute(
@@ -102,6 +232,110 @@ def gerar_contas_fixas_mes_atual(conn=None) -> None:
                 data_fim,
             ),
         )
+
+    conn_local.commit()
+    if close_conn:
+        conn_local.close()
+
+
+def garantir_contas_casa_competencia(mes: int, ano: int, conn=None) -> None:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+    idx_alvo = _indice_competencia(mes, ano)
+    cur.execute(
+        """
+        SELECT c1.nome, c1.categoria, c1.valor_padrao, c1.desconto_pessoa_nome,
+               c1.vencimento_dia, c1.vencimento_data, c1.data_fim
+        FROM contas_fixas c1
+        INNER JOIN (
+            SELECT nome, MAX(ano_referencia * 12 + (mes_referencia - 1)) AS idx_ref
+            FROM contas_fixas
+            WHERE (ano_referencia * 12 + (mes_referencia - 1)) <= ?
+              AND LOWER(COALESCE(categoria, '')) IN ('energia', 'gás', 'gas', 'aluguel', 'telefone', 'internet')
+            GROUP BY nome
+        ) ult
+            ON ult.nome = c1.nome
+           AND ((c1.ano_referencia * 12) + (c1.mes_referencia - 1)) = ult.idx_ref
+        ORDER BY c1.nome;
+        """,
+        (idx_alvo,),
+    )
+    rows = cur.fetchall()
+
+    for r in rows:
+        nome = r["nome"]
+        categoria = r["categoria"]
+        if not _categoria_casa_recorrente(categoria):
+            continue
+        cur.execute(
+            """
+            SELECT 1
+            FROM contas_fixas
+            WHERE nome = ? AND mes_referencia = ? AND ano_referencia = ?
+            LIMIT 1;
+            """,
+            (nome, int(mes), int(ano)),
+        )
+        if cur.fetchone():
+            continue
+
+        data_fim = r["data_fim"]
+        if data_fim:
+            try:
+                fim = date.fromisoformat(str(data_fim))
+            except ValueError:
+                fim = None
+            if fim and _indice_competencia(fim.month, fim.year) < idx_alvo:
+                continue
+
+        vencimento_base = r["vencimento_data"]
+        if vencimento_base is not None:
+            vencimento_base = str(vencimento_base)
+        vencimento_comp = _vencimento_data_competencia(vencimento_base, mes, ano)
+        valor_comp = _valor_conta_casa_competencia(categoria, r["valor_padrao"])
+        _inserir_conta_fixa(
+            cur,
+            nome,
+            categoria,
+            valor_comp,
+            r["desconto_pessoa_nome"],
+            None,
+            None,
+            vencimento_comp,
+            date.fromisoformat(vencimento_comp).day if vencimento_comp else r["vencimento_dia"],
+            mes,
+            ano,
+            data_fim,
+        )
+
+    cur.execute(
+        """
+        SELECT 1
+        FROM contas_fixas
+        WHERE mes_referencia = ? AND ano_referencia = ?
+          AND LOWER(COALESCE(categoria, '')) IN ('gás', 'gas')
+        LIMIT 1;
+        """,
+        (int(mes), int(ano)),
+    )
+    if not cur.fetchone():
+        _inserir_conta_fixa(
+            cur,
+            "Gás",
+            "Gás",
+            0.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            mes,
+            ano,
+            None,
+        )
+
+    _remover_duplicatas_contas_casa_competencia(cur, mes, ano)
 
     conn_local.commit()
     if close_conn:
@@ -138,27 +372,33 @@ def criar_conta_fixa(
         except ValueError:
             vencimento_data = None
             vencimento_dia = None
-    cur.execute(
-        """
-        INSERT INTO contas_fixas
-        (nome, categoria, valor_padrao, desconto_pessoa_nome, desconto_origem, desconto_receita_extra_id, desconto_aplicado,
-         vencimento_dia, vencimento_data, mes_referencia, ano_referencia, status, data_fim)
-        VALUES (?, ?, ?, ?, ?, ?, FALSE, ?, ?, ?, ?, 'Pendente', ?);
-        """,
-        (
+    for mes_ref, ano_ref in _competencias_ate_data_fim(mes, ano, data_fim):
+        vencimento_comp = _vencimento_data_competencia(vencimento_data, mes_ref, ano_ref)
+        cur.execute(
+            """
+            SELECT 1
+            FROM contas_fixas
+            WHERE nome = ? AND mes_referencia = ? AND ano_referencia = ?
+            LIMIT 1;
+            """,
+            (nome, int(mes_ref), int(ano_ref)),
+        )
+        if cur.fetchone():
+            continue
+        _inserir_conta_fixa(
+            cur,
             nome,
             categoria,
             valor_padrao,
             desconto_pessoa_nome,
             desconto_origem,
             desconto_receita_extra_id,
-            vencimento_dia,
-            vencimento_data,
-            mes,
-            ano,
+            vencimento_comp,
+            date.fromisoformat(vencimento_comp).day if vencimento_comp else vencimento_dia,
+            mes_ref,
+            ano_ref,
             data_fim,
-        ),
-    )
+        )
     conn.commit()
     conn.close()
 
@@ -261,6 +501,37 @@ def atualizar_conta_fixa(
         ),
     )
     ok = cur.rowcount > 0
+    if ok and data_fim:
+        for mes_ref, ano_ref in _competencias_ate_data_fim(int(mes_referencia), int(ano_referencia), data_fim):
+            if int(mes_ref) == int(mes_referencia) and int(ano_ref) == int(ano_referencia):
+                continue
+            cur.execute(
+                """
+                SELECT id
+                FROM contas_fixas
+                WHERE nome = ? AND mes_referencia = ? AND ano_referencia = ?
+                LIMIT 1;
+                """,
+                (nome, int(mes_ref), int(ano_ref)),
+            )
+            row_existente = cur.fetchone()
+            if row_existente:
+                continue
+            vencimento_comp = _vencimento_data_competencia(vencimento_data, mes_ref, ano_ref)
+            _inserir_conta_fixa(
+                cur,
+                nome,
+                categoria,
+                valor_padrao,
+                desconto_pessoa_nome,
+                desconto_origem,
+                desconto_receita_extra_id,
+                vencimento_comp,
+                date.fromisoformat(vencimento_comp).day if vencimento_comp else vencimento_dia,
+                mes_ref,
+                ano_ref,
+                data_fim,
+            )
     conn.commit()
     conn.close()
     return ok
@@ -269,7 +540,47 @@ def atualizar_conta_fixa(
 def excluir_conta_fixa(conta_id: int) -> bool:
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM contas_fixas WHERE id = ?;", (conta_id,))
+    cur.execute(
+        """
+        SELECT id, nome, categoria, desconto_pessoa_nome, vencimento_dia, vencimento_data,
+               valor_padrao, mes_referencia, ano_referencia, data_fim
+        FROM contas_fixas
+        WHERE id = ?;
+        """,
+        (conta_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return False
+
+    data = dict(row)
+    if data.get("data_fim"):
+        cur.execute(
+            """
+            DELETE FROM contas_fixas
+            WHERE nome = ?
+              AND COALESCE(categoria, '') = COALESCE(?, '')
+              AND COALESCE(desconto_pessoa_nome, '') = COALESCE(?, '')
+              AND COALESCE(vencimento_dia, 0) = COALESCE(?, 0)
+              AND COALESCE(valor_padrao, 0) = COALESCE(?, 0)
+              AND COALESCE(CAST(data_fim AS TEXT), '') = COALESCE(CAST(? AS TEXT), '')
+              AND (ano_referencia * 12 + mes_referencia) >= (? * 12 + ?);
+            """,
+            (
+                data["nome"],
+                data.get("categoria"),
+                data.get("desconto_pessoa_nome"),
+                data.get("vencimento_dia"),
+                data.get("valor_padrao"),
+                data.get("data_fim"),
+                int(data["ano_referencia"]),
+                int(data["mes_referencia"]),
+            ),
+        )
+    else:
+        cur.execute("DELETE FROM contas_fixas WHERE id = ?;", (conta_id,))
+
     ok = cur.rowcount > 0
     conn.commit()
     conn.close()
