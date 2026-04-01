@@ -1158,26 +1158,28 @@ def calcular_totais_por_pessoa(
         for r in cur.fetchall()
     }
 
-    # Parceladas ativas (carrega uma vez e reutiliza no cálculo de total e pago).
+    # Parceladas com histórico (carrega uma vez e reutiliza no cálculo de total e pago).
     cur.execute(
         """
         SELECT
             cp.id,
             cp.pessoa_id,
+            cp.descricao,
             cp.valor_parcela,
             cp.total_parcelas,
             cp.parcela_atual,
             cp.mes_inicio,
-            cp.ano_inicio
+            cp.ano_inicio,
+            cp.status
         FROM cartao_parceladas cp
         WHERE cp.pessoa_id IS NOT NULL
-          AND cp.status = 'Ativa';
         """
     )
-    parceladas_ativas = cur.fetchall()
+    parceladas = cur.fetchall()
     quitadas_por_item_pessoa: Dict[Tuple[int, int], int] = {}
-    if parceladas_ativas:
-        ids_parceladas = [int(r["id"]) for r in parceladas_ativas]
+    historico_parceladas: Dict[Tuple[int, int], Dict[str, int | None]] = {}
+    if parceladas:
+        ids_parceladas = [int(r["id"]) for r in parceladas]
         filtros_ids = ", ".join(["?"] * len(ids_parceladas))
         cur.execute(
             f"""
@@ -1193,39 +1195,83 @@ def calcular_totais_por_pessoa(
             (int(r["pessoa_id"]), int(r["item_id"])): int(r["qtd_quitadas"])
             for r in cur.fetchall()
         }
+        cur.execute(
+            f"""
+            SELECT pessoa_id, item_id, descricao_item, mes_referencia, ano_referencia
+            FROM pagamentos_terceiros_itens
+            WHERE tipo = 'cartao_parcelada'
+              AND item_id IN ({filtros_ids});
+            """,
+            tuple(ids_parceladas),
+        )
+        for r in cur.fetchall():
+            pessoa_id = int(r["pessoa_id"])
+            item_id = int(r["item_id"])
+            parcela_num, _ = _extrair_parcela_descricao(r["descricao_item"])
+            if parcela_num is None:
+                continue
+            chave = (pessoa_id, item_id)
+            info = historico_parceladas.setdefault(
+                chave,
+                {"primeiro_idx": None, "ultima_parcela": None},
+            )
+            idx_primeiro = _indice_competencia(
+                int(r["mes_referencia"]),
+                int(r["ano_referencia"]),
+            ) - (parcela_num - 1)
+            if info["primeiro_idx"] is None or idx_primeiro < int(info["primeiro_idx"]):
+                info["primeiro_idx"] = idx_primeiro
+            if info["ultima_parcela"] is None or parcela_num > int(info["ultima_parcela"]):
+                info["ultima_parcela"] = parcela_num
 
     parceladas_contabilizadas: set[Tuple[int, int]] = set()
 
-    # Parceladas: soma apenas quando houver parcela correspondente ao(s) mês(es) em foco.
-    for row in parceladas_ativas:
+    # Parceladas: soma quando houver parcela correspondente ao(s) mês(es) em foco,
+    # inclusive itens já finalizados que ainda tenham parcelas futuras inferidas pelo histórico.
+    for row in parceladas:
         pessoa_id = row["pessoa_id"]
         if pessoa_id is None:
             continue
         parcela_atual = int(row["parcela_atual"])
         total_parcelas = int(row["total_parcelas"])
-        restantes = max(total_parcelas - parcela_atual + 1, 0)
-        if int(quitadas_por_item_pessoa.get((int(pessoa_id), int(row["id"])), 0)) >= restantes:
-            continue
-        mes_primeira, ano_primeira = _competencia_primeira_parcela(
-            int(row["mes_inicio"]),
-            int(row["ano_inicio"]),
-            parcela_atual,
-        )
-        idx_inicio = _indice_competencia(mes_primeira, ano_primeira)
+        item_id = int(row["id"])
+        historico = historico_parceladas.get((int(pessoa_id), item_id), {})
+        ultima_parcela_paga = int(historico.get("ultima_parcela") or 0)
+        status_item = str(row["status"] or "Ativa")
+        if ultima_parcela_paga:
+            parcela_base = ultima_parcela_paga + 1
+            if parcela_base > total_parcelas:
+                continue
+        else:
+            if status_item != "Ativa":
+                continue
+            parcela_base = parcela_atual
+            restantes = max(total_parcelas - parcela_atual + 1, 0)
+            if int(quitadas_por_item_pessoa.get((int(pessoa_id), item_id), 0)) >= restantes:
+                continue
+
+        idx_inicio = historico.get("primeiro_idx")
+        if idx_inicio is None:
+            mes_primeira, ano_primeira = _competencia_primeira_parcela(
+                int(row["mes_inicio"]),
+                int(row["ano_inicio"]),
+                parcela_atual,
+            )
+            idx_inicio = _indice_competencia(mes_primeira, ano_primeira)
 
         conta_no_mes = False
         for mes_ref, ano_ref in competencias_cartao:
-            idx_ref = _indice_competencia(mes_ref, ano_ref)
-            delta = idx_ref - idx_inicio
+            idx_ref_comp = _indice_competencia(mes_ref, ano_ref)
+            delta = idx_ref_comp - int(idx_inicio)
             parcela_num = 1 + delta
-            if 1 <= parcela_num <= total_parcelas:
+            if parcela_base <= parcela_num <= total_parcelas:
                 conta_no_mes = True
                 break
 
         if conta_no_mes:
             totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
             totals[pessoa_id]["total_mes"] += float(row["valor_parcela"])
-            parceladas_contabilizadas.add((int(pessoa_id), int(row["id"])))
+            parceladas_contabilizadas.add((int(pessoa_id), item_id))
     filtros_cartao = " OR ".join(
         ["(mes_referencia = ? AND ano_referencia = ?)"] * len(competencias_cartao)
     )
@@ -1325,23 +1371,26 @@ def calcular_totais_por_pessoa(
                 _add_pago(pid, float(row["valor"]))
 
     # Parceladas pagas no mês alvo (reaproveita carga de parceladas + mapa de quitadas).
-    for row in parceladas_ativas:
+    for row in parceladas:
         pid = int(row["pessoa_id"])
         item_id = int(row["id"])
         if (pid, "cartao_parcelada", item_id) not in pagos_mes_keys:
             continue
         parcela_atual = int(row["parcela_atual"])
         total_parcelas = int(row["total_parcelas"])
-        restantes = max(total_parcelas - parcela_atual + 1, 0)
-        if int(quitadas_por_item_pessoa.get((pid, item_id), 0)) >= restantes:
-            continue
-        mes_primeira, ano_primeira = _competencia_primeira_parcela(
-            int(row["mes_inicio"]),
-            int(row["ano_inicio"]),
-            parcela_atual,
-        )
-        idx_inicio = _indice_competencia(mes_primeira, ano_primeira)
-        delta = idx_ref - idx_inicio
+        historico = historico_parceladas.get((pid, item_id), {})
+        idx_inicio = historico.get("primeiro_idx")
+        if idx_inicio is None:
+            restantes = max(total_parcelas - parcela_atual + 1, 0)
+            if int(quitadas_por_item_pessoa.get((pid, item_id), 0)) >= restantes:
+                continue
+            mes_primeira, ano_primeira = _competencia_primeira_parcela(
+                int(row["mes_inicio"]),
+                int(row["ano_inicio"]),
+                parcela_atual,
+            )
+            idx_inicio = _indice_competencia(mes_primeira, ano_primeira)
+        delta = idx_ref - int(idx_inicio)
         parcela_num = 1 + delta
         if parcela_num < 1 or parcela_num > total_parcelas:
             continue

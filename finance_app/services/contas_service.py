@@ -63,9 +63,21 @@ def _categoria_casa_recorrente(categoria: str | None) -> bool:
     return (categoria or "").strip().lower() in _CATEGORIAS_CASA_RECORRENTES
 
 
-def _valor_conta_casa_competencia(categoria: str | None, valor_padrao: float | None) -> float | None:
+def _valor_conta_casa_competencia(
+    categoria: str | None,
+    valor_padrao: float | None,
+    mes: int | None = None,
+    ano: int | None = None,
+) -> float | None:
     categoria_normalizada = (categoria or "").strip().lower()
     if categoria_normalizada in {"gás", "gas"}:
+        return 0.0
+    if (
+        categoria_normalizada == "energia"
+        and mes is not None
+        and ano is not None
+        and _indice_competencia(int(mes), int(ano)) >= _indice_competencia(5, 2026)
+    ):
         return 0.0
     return valor_padrao
 
@@ -293,7 +305,7 @@ def garantir_contas_casa_competencia(mes: int, ano: int, conn=None) -> None:
         if vencimento_base is not None:
             vencimento_base = str(vencimento_base)
         vencimento_comp = _vencimento_data_competencia(vencimento_base, mes, ano)
-        valor_comp = _valor_conta_casa_competencia(categoria, r["valor_padrao"])
+        valor_comp = _valor_conta_casa_competencia(categoria, r["valor_padrao"], mes, ano)
         _inserir_conta_fixa(
             cur,
             nome,

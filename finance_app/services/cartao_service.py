@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Dict, List, Tuple
 
 from finance_app.database import get_connection
@@ -23,6 +24,14 @@ def _competencia_primeira_parcela(
 ) -> Tuple[int, int]:
     idx_primeira = _indice_competencia(mes_referencia, ano_referencia) - (int(parcela_atual) - 1)
     return (idx_primeira % 12) + 1, idx_primeira // 12
+
+
+def _extrair_parcela_descricao(texto: object | None) -> Tuple[int | None, int | None]:
+    descricao = str(texto or "")
+    match = re.search(r"parcela\s+(\d+)\s*/\s*(\d+)", descricao, flags=re.IGNORECASE)
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
 
 
 def get_config() -> CartaoConfig:
@@ -169,11 +178,10 @@ def listar_avista_mes(mes: int, ano: int) -> List[CartaoAvista]:
 
 
 def mes_ano_fatura_em_aberto(hoje: date | None = None) -> Tuple[int, int]:
-    mes_ref, ano_ref = mes_ano_fatura_atual(hoje=hoje)
-    cfg = get_config()
-    if cfg.fatura_paga:
-        return _add_meses(mes_ref, ano_ref, 1)
-    return mes_ref, ano_ref
+    # A competência em aberto segue apenas a regra de fechamento.
+    # A flag fatura_paga indica status da competência exibida, mas não deve
+    # empurrar automaticamente a navegação para o mês seguinte.
+    return mes_ano_fatura_atual(hoje=hoje)
 
 
 def calcular_fatura_competencia(mes_ref: int, ano_ref: int) -> Dict[str, float]:
@@ -305,19 +313,48 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
         ORDER BY ano_inicio DESC, mes_inicio DESC, id DESC;
         """
     )
-    for r in cur.fetchall():
-        item = dict(r)
+    parceladas = [dict(r) for r in cur.fetchall()]
+    historico_primeira_competencia: Dict[int, int] = {}
+    if parceladas:
+        ids_parceladas = [int(item["id"]) for item in parceladas]
+        filtros_ids = ", ".join(["?"] * len(ids_parceladas))
+        cur.execute(
+            f"""
+            SELECT item_id, descricao_item, mes_referencia, ano_referencia
+            FROM pagamentos_terceiros_itens
+            WHERE tipo = 'cartao_parcelada'
+              AND item_id IN ({filtros_ids});
+            """,
+            tuple(ids_parceladas),
+        )
+        for row in cur.fetchall():
+            item_id = int(row["item_id"])
+            parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
+            if parcela_num is None:
+                continue
+            idx_primeiro = _indice_competencia(
+                int(row["mes_referencia"]),
+                int(row["ano_referencia"]),
+            ) - (parcela_num - 1)
+            if item_id not in historico_primeira_competencia or idx_primeiro < historico_primeira_competencia[item_id]:
+                historico_primeira_competencia[item_id] = idx_primeiro
+
+    for item in parceladas:
         total_parcelas = int(item.get("total_parcelas") or 1)
         parcela_atual = int(item.get("parcela_atual") or 1)
         status = str(item.get("status") or "")
-        mes_referencia = int(item.get("mes_inicio") or 1)
-        ano_referencia = int(item.get("ano_inicio") or date.today().year)
-        parcela_referencia = max(1, min(parcela_atual, total_parcelas))
-        mes_inicio, ano_inicio = _competencia_primeira_parcela(
-            mes_referencia,
-            ano_referencia,
-            parcela_referencia,
-        )
+        idx_primeiro = historico_primeira_competencia.get(int(item["id"]))
+        if idx_primeiro is None:
+            mes_referencia = int(item.get("mes_inicio") or 1)
+            ano_referencia = int(item.get("ano_inicio") or date.today().year)
+            parcela_referencia = max(1, min(parcela_atual, total_parcelas))
+            mes_inicio, ano_inicio = _competencia_primeira_parcela(
+                mes_referencia,
+                ano_referencia,
+                parcela_referencia,
+            )
+        else:
+            mes_inicio, ano_inicio = (idx_primeiro % 12) + 1, idx_primeiro // 12
 
         for off in range(total_parcelas):
             parcela_exibicao = off + 1
