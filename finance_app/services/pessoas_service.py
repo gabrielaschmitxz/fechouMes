@@ -369,6 +369,57 @@ def _competencia_conta_fixa(
     return int(mes_referencia), int(ano_referencia)
 
 
+def _parse_data_iso_flex(texto: object | None) -> date | None:
+    if not texto:
+        return None
+    valor = str(texto).strip()
+    if not valor:
+        return None
+    try:
+        return date.fromisoformat(valor[:10])
+    except Exception:
+        pass
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(valor[:10], fmt).date()
+        except Exception:
+            continue
+    return None
+
+
+def _descricao_conta_fixa(
+    nome: object | None,
+    mes_competencia: int,
+    ano_competencia: int,
+    mes_inicio: int,
+    ano_inicio: int,
+    data_fim: object | None = None,
+) -> str:
+    descricao = f"Conta fixa: {str(nome or '').strip() or 'Conta fixa'}"
+    dt_fim = _parse_data_iso_flex(data_fim)
+    if dt_fim is None:
+        return descricao
+    idx_inicio = _indice_competencia(mes_inicio, ano_inicio)
+    idx_fim = _indice_competencia(dt_fim.month, dt_fim.year)
+    idx_atual = _indice_competencia(mes_competencia, ano_competencia)
+    if idx_fim < idx_inicio or idx_atual < idx_inicio or idx_atual > idx_fim:
+        return descricao
+    parcela_atual = (idx_atual - idx_inicio) + 1
+    total_parcelas = (idx_fim - idx_inicio) + 1
+    return f"{descricao} ({parcela_atual}/{total_parcelas})"
+
+
+def _chave_serie_conta_fixa(
+    nome: object | None,
+    data_fim: object | None,
+    valor: object | None = None,
+) -> Tuple[str, str, str]:
+    nome_key = str(nome or "").strip().lower()
+    data_fim_key = str(_parse_data_iso_flex(data_fim) or "").strip()
+    valor_key = f"{float(valor or 0):.2f}"
+    return nome_key, data_fim_key, valor_key
+
+
 def _descricao_pagamento_parcelada(texto: object | None) -> str:
     descricao = str(texto or "").strip()
     return descricao or "Cartão parcelado"
@@ -501,11 +552,12 @@ def listar_contas_pendentes_pessoa(
             SELECT
                 'conta_fixa' AS tipo,
                 cf.id AS item_id,
-                ('Conta fixa: ' || cf.nome) AS descricao,
+                cf.nome AS nome,
                 COALESCE(cf.valor_padrao, 0) AS valor,
                 cf.mes_referencia AS mes_referencia,
                 cf.ano_referencia AS ano_referencia,
-                cf.vencimento_data AS vencimento_data
+                cf.vencimento_data AS vencimento_data,
+                cf.data_fim AS data_fim
             FROM contas_fixas cf
             WHERE LOWER(TRIM(COALESCE(cf.desconto_pessoa_nome, ''))) = LOWER(TRIM(?))
               AND cf.status = 'Pendente'
@@ -526,18 +578,37 @@ def listar_contas_pendentes_pessoa(
                 ano_referencia,
             ),
         )
-        for r in cur.fetchall():
+        contas_fixas_rows = cur.fetchall()
+        inicio_serie_por_chave: Dict[Tuple[str, str, str], Tuple[int, int]] = {}
+        for r in contas_fixas_rows:
+            chave_serie = _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor"])
+            competencia_inicio = (int(r["mes_referencia"]), int(r["ano_referencia"]))
+            competencia_atual = inicio_serie_por_chave.get(chave_serie)
+            if competencia_atual is None or _indice_competencia(*competencia_inicio) < _indice_competencia(*competencia_atual):
+                inicio_serie_por_chave[chave_serie] = competencia_inicio
+        for r in contas_fixas_rows:
             m_cf, a_cf = _competencia_conta_fixa(
                 int(r["mes_referencia"]),
                 int(r["ano_referencia"]),
                 r["vencimento_data"],
             )
             if (m_cf, a_cf) == (mes_referencia, ano_referencia):
+                mes_inicio_serie, ano_inicio_serie = inicio_serie_por_chave.get(
+                    _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor"]),
+                    (int(r["mes_referencia"]), int(r["ano_referencia"])),
+                )
                 pendentes.append(
                     {
                         "tipo": str(r["tipo"]),
                         "item_id": int(r["item_id"]),
-                        "descricao": str(r["descricao"]),
+                        "descricao": _descricao_conta_fixa(
+                            r["nome"],
+                            mes_referencia,
+                            ano_referencia,
+                            mes_inicio_serie,
+                            ano_inicio_serie,
+                            r["data_fim"],
+                        ),
                         "valor": float(r["valor"]),
                     }
                 )
@@ -659,9 +730,6 @@ def listar_contas_status_pessoa_meses(
             if info["ultima_parcela"] is None or parcela_num > int(info["ultima_parcela"]):
                 info["ultima_parcela"] = parcela_num
 
-    base_mes = mes_cartao_referencia if mes_cartao_referencia is not None else refs_unicas[0][0]
-    base_ano = ano_cartao_referencia if ano_cartao_referencia is not None else refs_unicas[0][1]
-    idx_base = base_ano * 12 + (base_mes - 1)
     parceladas_adicionadas: set[Tuple[int, int, int]] = set()
     for r in parceladas_ativas:
         item_id = int(r["id"])
@@ -683,7 +751,10 @@ def listar_contas_status_pessoa_meses(
                 continue
         idx_primeiro = historico.get("primeiro_idx")
         if idx_primeiro is None:
-            idx_primeiro = idx_base - (parcela_atual - 1)
+            idx_primeiro = _indice_competencia(
+                int(r["mes_inicio"]),
+                int(r["ano_inicio"]),
+            )
         for m_ref, a_ref in refs_unicas:
             idx_ref = a_ref * 12 + (m_ref - 1)
             parcela_num = idx_ref - int(idx_primeiro) + 1
@@ -795,7 +866,7 @@ def listar_contas_status_pessoa_meses(
     if nome_pessoa:
         cur.execute(
             """
-            SELECT id, nome, valor_padrao, mes_referencia, ano_referencia, vencimento_data, status
+            SELECT id, nome, valor_padrao, mes_referencia, ano_referencia, vencimento_data, data_fim, status
             FROM contas_fixas
             WHERE LOWER(TRIM(COALESCE(desconto_pessoa_nome, ''))) = LOWER(TRIM(?))
               AND (
@@ -805,7 +876,15 @@ def listar_contas_status_pessoa_meses(
             """,
             (nome_pessoa, idx_min - 1, idx_max + 1),
         )
-        for r in cur.fetchall():
+        contas_fixas_rows = cur.fetchall()
+        inicio_serie_por_chave: Dict[Tuple[str, str, str], Tuple[int, int]] = {}
+        for r in contas_fixas_rows:
+            chave_serie = _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor_padrao"])
+            competencia_inicio = (int(r["mes_referencia"]), int(r["ano_referencia"]))
+            competencia_atual = inicio_serie_por_chave.get(chave_serie)
+            if competencia_atual is None or _indice_competencia(*competencia_inicio) < _indice_competencia(*competencia_atual):
+                inicio_serie_por_chave[chave_serie] = competencia_inicio
+        for r in contas_fixas_rows:
             m_cf, a_cf = _competencia_conta_fixa(
                 int(r["mes_referencia"]),
                 int(r["ano_referencia"]),
@@ -816,11 +895,22 @@ def listar_contas_status_pessoa_meses(
             chave = f"{a_cf}-{m_cf:02d}"
             item_id = int(r["id"])
             pago = bool(str(r["status"]) == "Pago" or ("conta_fixa", item_id, m_cf, a_cf) in pagos_keys)
+            mes_inicio_serie, ano_inicio_serie = inicio_serie_por_chave.get(
+                _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor_padrao"]),
+                (int(r["mes_referencia"]), int(r["ano_referencia"])),
+            )
             mapa[chave].append(
                 {
                     "tipo": "conta_fixa",
                     "item_id": item_id,
-                    "descricao": f"Conta fixa: {r['nome']}",
+                    "descricao": _descricao_conta_fixa(
+                        r["nome"],
+                        m_cf,
+                        a_cf,
+                        mes_inicio_serie,
+                        ano_inicio_serie,
+                        r["data_fim"],
+                    ),
                     "valor": float(r["valor_padrao"] or 0),
                     "mes_referencia": m_cf,
                     "ano_referencia": a_cf,
@@ -974,11 +1064,12 @@ def _listar_contas_status_pessoa_legacy(
             SELECT
                 'conta_fixa' AS tipo,
                 cf.id AS item_id,
-                ('Conta fixa: ' || cf.nome) AS descricao,
+                cf.nome AS nome,
                 COALESCE(cf.valor_padrao, 0) AS valor,
                 cf.mes_referencia AS mes_referencia_db,
                 cf.ano_referencia AS ano_referencia_db,
                 cf.vencimento_data AS vencimento_data,
+                cf.data_fim AS data_fim,
                 (cf.status = 'Pago' OR EXISTS (
                     SELECT 1
                     FROM pagamentos_terceiros_itens pi
@@ -998,18 +1089,37 @@ def _listar_contas_status_pessoa_legacy(
                 nome_pessoa,
             ),
         )
-        for r in cur.fetchall():
+        contas_fixas_rows = cur.fetchall()
+        inicio_serie_por_chave: Dict[Tuple[str, str, str], Tuple[int, int]] = {}
+        for r in contas_fixas_rows:
+            chave_serie = _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor"])
+            competencia_inicio = (int(r["mes_referencia_db"]), int(r["ano_referencia_db"]))
+            competencia_atual = inicio_serie_por_chave.get(chave_serie)
+            if competencia_atual is None or _indice_competencia(*competencia_inicio) < _indice_competencia(*competencia_atual):
+                inicio_serie_por_chave[chave_serie] = competencia_inicio
+        for r in contas_fixas_rows:
             m_cf, a_cf = _competencia_conta_fixa(
                 int(r["mes_referencia_db"]),
                 int(r["ano_referencia_db"]),
                 r["vencimento_data"],
             )
             if (m_cf, a_cf) == (mes_referencia, ano_referencia):
+                mes_inicio_serie, ano_inicio_serie = inicio_serie_por_chave.get(
+                    _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor"]),
+                    (int(r["mes_referencia_db"]), int(r["ano_referencia_db"])),
+                )
                 contas.append(
                     {
                         "tipo": str(r["tipo"]),
                         "item_id": int(r["item_id"]),
-                        "descricao": str(r["descricao"]),
+                        "descricao": _descricao_conta_fixa(
+                            r["nome"],
+                            mes_referencia,
+                            ano_referencia,
+                            mes_inicio_serie,
+                            ano_inicio_serie,
+                            r["data_fim"],
+                        ),
                         "valor": float(r["valor"]),
                         "mes_referencia": mes_referencia,
                         "ano_referencia": ano_referencia,
@@ -1252,12 +1362,10 @@ def calcular_totais_por_pessoa(
 
         idx_inicio = historico.get("primeiro_idx")
         if idx_inicio is None:
-            mes_primeira, ano_primeira = _competencia_primeira_parcela(
+            idx_inicio = _indice_competencia(
                 int(row["mes_inicio"]),
                 int(row["ano_inicio"]),
-                parcela_atual,
             )
-            idx_inicio = _indice_competencia(mes_primeira, ano_primeira)
 
         conta_no_mes = False
         for mes_ref, ano_ref in competencias_cartao:
@@ -1384,12 +1492,10 @@ def calcular_totais_por_pessoa(
             restantes = max(total_parcelas - parcela_atual + 1, 0)
             if int(quitadas_por_item_pessoa.get((pid, item_id), 0)) >= restantes:
                 continue
-            mes_primeira, ano_primeira = _competencia_primeira_parcela(
+            idx_inicio = _indice_competencia(
                 int(row["mes_inicio"]),
                 int(row["ano_inicio"]),
-                parcela_atual,
             )
-            idx_inicio = _indice_competencia(mes_primeira, ano_primeira)
         delta = idx_ref - int(idx_inicio)
         parcela_num = 1 + delta
         if parcela_num < 1 or parcela_num > total_parcelas:
@@ -1542,6 +1648,8 @@ def listar_previsao_contas_por_mes_pessoa(
             cp.valor_parcela,
             cp.total_parcelas,
             cp.parcela_atual,
+            cp.mes_inicio,
+            cp.ano_inicio,
             cp.status,
             COALESCE(q.qtd_quitadas, 0) AS qtd_quitadas
         FROM cartao_parceladas cp
@@ -1606,7 +1714,10 @@ def listar_previsao_contas_por_mes_pessoa(
                 continue
         idx_primeiro = historico.get("primeiro_idx")
         if idx_primeiro is None:
-            idx_primeiro = _indice_competencia(base_mes, base_ano) - (parcela_atual - 1)
+            idx_primeiro = _indice_competencia(
+                int(r["mes_inicio"]),
+                int(r["ano_inicio"]),
+            )
         for parcela_num in range(parcela_base, total_parcelas + 1):
             off = parcela_num - 1
             idx_comp = int(idx_primeiro) + off
@@ -1645,6 +1756,8 @@ def listar_previsao_contas_por_mes_pessoa(
                 "nome": str(r["nome"]),
                 "categoria": str(r["categoria"] or ""),
                 "valor": float(r["valor_padrao"]),
+                "mes_inicio": int(r["mes_referencia"]),
+                "ano_inicio": int(r["ano_referencia"]),
                 "mes": mes_c,
                 "ano": ano_c,
                 "data_fim": r["data_fim"],
@@ -1680,7 +1793,19 @@ def listar_previsao_contas_por_mes_pessoa(
             for competencia_idx in range(inicio_conta_idx, fim_conta_idx + 1):
                 ano_i = competencia_idx // 12
                 mes_i = (competencia_idx % 12) + 1
-                add_item(mes_i, ano_i, f"Conta fixa: {nome_conta}", float(versao["valor"]))
+                add_item(
+                    mes_i,
+                    ano_i,
+                    _descricao_conta_fixa(
+                        nome_conta,
+                        mes_i,
+                        ano_i,
+                        int(versao["mes_inicio"]),
+                        int(versao["ano_inicio"]),
+                        versao.get("data_fim"),
+                    ),
+                    float(versao["valor"]),
+                )
 
     if close_conn:
         conn_local.close()
