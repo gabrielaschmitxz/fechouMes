@@ -66,6 +66,37 @@
 
 <br>
 
+<div class="section-title">GASTOS POR CATEGORIA</div>
+<p style="font-size: 0.92rem; color: #475569; margin: -0.35rem 0 1rem;">
+    Competência {{ "%02d"|format(mes_ref) }}/{{ ano_ref }} — clique em uma fatia para ver os lançamentos.
+</p>
+<div class="dashboard-categorias-card">
+    {% if gastos_categoria.categorias %}
+    <div class="dashboard-categorias-chart-wrap">
+        <canvas id="chartCategorias" aria-label="Gráfico de gastos por categoria"></canvas>
+    </div>
+    <div id="categoria-detalhe" class="dashboard-categorias-detalhe" hidden>
+        <h5 id="categoria-detalhe-titulo" style="margin: 0 0 0.75rem 0; color: #2d3748;"></h5>
+        <div class="table table-blue">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Descrição</th>
+                        <th style="text-align: right; width: 140px;">Valor</th>
+                    </tr>
+                </thead>
+                <tbody id="categoria-detalhe-corpo"></tbody>
+            </table>
+        </div>
+    </div>
+    <p id="categoria-detalhe-hint" class="dashboard-categorias-hint">Clique em uma fatia do gráfico para listar os gastos da categoria.</p>
+    {% else %}
+    <p style="color: #64748b; margin: 0;">Nenhum lançamento do cartão nesta competência.</p>
+    {% endif %}
+</div>
+
+<br>
+
 <div class="section-title">LIMITE E STATUS</div>
 <div class="row">
     <div class="col-4">
@@ -90,4 +121,96 @@
     </div>
 </div>
 
+{% endblock %}
+
+{% block extra_scripts %}
+{% if gastos_categoria.categorias %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    const dados = {{ gastos_categoria | tojson }};
+    const categorias = dados.categorias || [];
+    const cores = [
+        "#1e3a8a", "#4facfe", "#16a34a", "#ff6a00", "#dc2626",
+        "#9333ea", "#0891b2", "#ca8a04", "#64748b", "#db2777",
+        "#0d9488", "#7c3aed", "#ea580c", "#2563eb", "#059669"
+    ];
+
+    const canvas = document.getElementById("chartCategorias");
+    const detalhe = document.getElementById("categoria-detalhe");
+    const hint = document.getElementById("categoria-detalhe-hint");
+    const titulo = document.getElementById("categoria-detalhe-titulo");
+    const corpo = document.getElementById("categoria-detalhe-corpo");
+    if (!canvas || !categorias.length) return;
+
+    const fmtMoeda = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+    const fmtPct = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+    function mostrarCategoria(indice) {
+        const cat = categorias[indice];
+        if (!cat) return;
+        titulo.textContent = cat.nome + " — " + fmtPct.format(cat.percentual) + "% — " + fmtMoeda.format(cat.valor);
+        corpo.innerHTML = "";
+        (cat.itens || []).forEach(function (item) {
+            const tr = document.createElement("tr");
+            const tdDesc = document.createElement("td");
+            tdDesc.textContent = item.descricao;
+            const tdValor = document.createElement("td");
+            tdValor.style.textAlign = "right";
+            tdValor.textContent = fmtMoeda.format(item.valor);
+            tr.appendChild(tdDesc);
+            tr.appendChild(tdValor);
+            corpo.appendChild(tr);
+        });
+        detalhe.hidden = false;
+        if (hint) hint.style.display = "none";
+        detalhe.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    new Chart(canvas, {
+        type: "pie",
+        data: {
+            labels: categorias.map(function (c) {
+                return c.nome + " (" + fmtPct.format(c.percentual) + "%)";
+            }),
+            datasets: [{
+                data: categorias.map(function (c) { return c.valor; }),
+                backgroundColor: categorias.map(function (_, i) { return cores[i % cores.length]; }),
+                borderWidth: 2,
+                borderColor: "#ffffff"
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            onClick: function (_evt, elements) {
+                if (!elements.length) return;
+                mostrarCategoria(elements[0].index);
+            },
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    onClick: function (_evt, legendItem) {
+                        if (legendItem && legendItem.index !== undefined) {
+                            mostrarCategoria(legendItem.index);
+                        }
+                    },
+                    labels: { boxWidth: 14, padding: 12, font: { size: 12 } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function (ctx) {
+                            const cat = categorias[ctx.dataIndex];
+                            return cat.nome + ": " + fmtMoeda.format(cat.valor) + " (" + fmtPct.format(cat.percentual) + "%)";
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    canvas.style.cursor = "pointer";
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -49,6 +49,12 @@ class ContaFixa:
 
 
 @dataclass
+class CartaoCategoria:
+    id: int
+    nome: str
+
+
+@dataclass
 class CartaoConfig:
     id: int
     limite_total: Optional[float]
@@ -68,6 +74,7 @@ class CartaoParcelada:
     ano_inicio: int
     status: str
     pessoa_id: Optional[int]
+    categoria_id: Optional[int] = None
 
 
 @dataclass
@@ -78,6 +85,7 @@ class CartaoAvista:
     mes_referencia: int
     ano_referencia: int
     pessoa_id: Optional[int]
+    categoria_id: Optional[int] = None
 
 
 @dataclass

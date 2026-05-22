@@ -162,10 +162,12 @@
                 </div>
                 {% if previsao.meses %}
                 {% set meses_nome = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
+                {% set chave_mes_filtro = previsao.chave_mes_ativo if previsao.chave_mes_ativo else (ano|string ~ '-' ~ ("%02d"|format(mes))) %}
                 <ul class="nav nav-tabs pessoas-tabs" role="tablist" style="margin-bottom: 0.75rem;">
                     {% for m in previsao.meses %}
+                    {% set chave_mes_tab = m.ano|string ~ '-' ~ ("%02d"|format(m.mes)) %}
                     <li class="nav-item">
-                        <a class="nav-link {% if loop.first %}active{% endif %}" data-toggle="tab" href="#sub-mes-{{ r.pessoa.id }}-{{ loop.index0 }}" role="tab">
+                        <a class="nav-link {% if chave_mes_tab == chave_mes_filtro %}active{% endif %}" data-toggle="tab" href="#sub-mes-{{ r.pessoa.id }}-{{ loop.index0 }}" role="tab">
                             {{ "%02d"|format(m.mes) }}/{{ m.ano }} - {{ meses_nome[m.mes] }}
                         </a>
                     </li>
@@ -173,7 +175,8 @@
                 </ul>
                 <div class="tab-content">
                     {% for m in previsao.meses %}
-                    <div class="tab-pane fade {% if loop.first %}show active{% endif %}" id="sub-mes-{{ r.pessoa.id }}-{{ loop.index0 }}" role="tabpanel">
+                    {% set chave_mes_tab = m.ano|string ~ '-' ~ ("%02d"|format(m.mes)) %}
+                    <div class="tab-pane fade {% if chave_mes_tab == chave_mes_filtro %}show active{% endif %}" id="sub-mes-{{ r.pessoa.id }}-{{ loop.index0 }}" role="tabpanel">
                         {% set chave_mes = m.ano|string ~ '-' ~ ("%02d"|format(m.mes)) %}
                         {% set contas_mes = contas_status_por_pessoa_mes.get(r.pessoa.id, {}).get(chave_mes, []) %}
                         {% set descontos_mes = descontos_itens_por_pessoa_mes.get(r.pessoa.id, {}).get(chave_mes, []) %}
@@ -229,8 +232,6 @@
                             <button type="submit" class="btn btn-success">Marcar tudo como pago</button>
                         </form>
                         {% endif %}
-                        {% else %}
-                        <p style="margin-bottom: 0.85rem;">Nenhuma conta para este mês.</p>
                         {% endif %}
                         <h6 style="margin: 0 0 0.5rem 0;">Descontos</h6>
                         <form method="POST" style="margin: 0.25rem 0 0.75rem;">

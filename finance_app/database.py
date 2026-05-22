@@ -524,7 +524,78 @@ def _init_db_postgres(cur: CursorCompat) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_receitas_lanc_extra ON receitas_lancamentos (receita_extra_id);")
 
 
+def _apply_cartao_categorias_migration(cur: CursorCompat) -> None:
+    if USE_POSTGRES:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cartao_categorias (
+                id BIGSERIAL PRIMARY KEY,
+                nome TEXT NOT NULL UNIQUE
+            );
+            """
+        )
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'cartao_avista';
+            """
+        )
+        cols_avista = {str(r["column_name"]) for r in cur.fetchall()}
+        if "categoria_id" not in cols_avista:
+            cur.execute(
+                """
+                ALTER TABLE cartao_avista
+                ADD COLUMN categoria_id BIGINT REFERENCES cartao_categorias (id) ON DELETE SET NULL;
+                """
+            )
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'cartao_parceladas';
+            """
+        )
+        cols_parceladas = {str(r["column_name"]) for r in cur.fetchall()}
+        if "categoria_id" not in cols_parceladas:
+            cur.execute(
+                """
+                ALTER TABLE cartao_parceladas
+                ADD COLUMN categoria_id BIGINT REFERENCES cartao_categorias (id) ON DELETE SET NULL;
+                """
+            )
+        return
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS cartao_categorias (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL UNIQUE
+        );
+        """
+    )
+    cur.execute("PRAGMA table_info(cartao_avista);")
+    cols_avista = {str(r["name"]) for r in cur.fetchall()}
+    if "categoria_id" not in cols_avista:
+        cur.execute(
+            """
+            ALTER TABLE cartao_avista
+            ADD COLUMN categoria_id INTEGER REFERENCES cartao_categorias (id) ON DELETE SET NULL;
+            """
+        )
+    cur.execute("PRAGMA table_info(cartao_parceladas);")
+    cols_parceladas = {str(r["name"]) for r in cur.fetchall()}
+    if "categoria_id" not in cols_parceladas:
+        cur.execute(
+            """
+            ALTER TABLE cartao_parceladas
+            ADD COLUMN categoria_id INTEGER REFERENCES cartao_categorias (id) ON DELETE SET NULL;
+            """
+        )
+
+
 def _apply_migrations(cur: CursorCompat) -> None:
+    _apply_cartao_categorias_migration(cur)
     if USE_POSTGRES:
         cur.execute(
             """
@@ -677,6 +748,10 @@ def ensure_seed_data() -> None:
                 """,
                 (admin_username, generate_password_hash(admin_password)),
             )
+
+        from finance_app.services import cartao_service
+
+        cartao_service.garantir_categorias_padrao(conn=conn)
 
         conn.commit()
     finally:

@@ -86,6 +86,17 @@ def _deslocar_competencia(mes: int, ano: int, delta: int):
     return (indice % 12) + 1, indice // 12
 
 
+def _parse_categoria_id(raw_value) -> int | None:
+    texto = str(raw_value or "").strip()
+    if not texto:
+        return None
+    try:
+        categoria_id = int(texto)
+    except (TypeError, ValueError):
+        return None
+    return categoria_id if categoria_id > 0 else None
+
+
 def _parse_brl_value(raw_value, default=0.0):
     if raw_value is None:
         return default
@@ -195,6 +206,7 @@ def dashboard():
         ano_aberto,
     )
     fatura_info = cartao_service.calcular_fatura_competencia(mes_ref, ano_ref)
+    gastos_categoria = cartao_service.listar_gastos_por_categoria_competencia(mes_ref, ano_ref)
     limite_total = _to_float(cfg.limite_total)
     total_fatura = _to_float(fatura_info.get("total_geral"))
     limite_disponivel = limite_total - total_fatura
@@ -211,6 +223,7 @@ def dashboard():
         anos_competencia=anos_competencia,
         mes_ref=mes_ref,
         ano_ref=ano_ref,
+        gastos_categoria=gastos_categoria,
     )
 
 
@@ -252,11 +265,58 @@ def cartao():
             flash('Fatura marcada como pendente novamente.', 'info')
             return redirect(url_for('cartao'))
         
+        elif action == 'nova_categoria':
+            nome = (request.form.get('nome') or '').strip()
+            if not nome:
+                flash('Informe o nome da categoria.', 'warning')
+            elif cartao_service.criar_categoria(nome):
+                flash('Categoria criada com sucesso.', 'success')
+            else:
+                flash('Não foi possível criar. Verifique se o nome já existe.', 'warning')
+            return redirect(url_for('cartao', aba='categorias'))
+
+        elif action == 'editar_categoria':
+            categoria_id = int(request.form.get('categoria_id', 0))
+            nome = (request.form.get('nome') or '').strip()
+            if categoria_id <= 0 or not nome:
+                flash('Dados inválidos para edição da categoria.', 'warning')
+            else:
+                resultado = cartao_service.atualizar_categoria(categoria_id, nome)
+                if resultado.get("ok"):
+                    qtd = int(resultado.get("lancamentos") or 0)
+                    nome_cat = resultado.get("nome") or nome
+                    if resultado.get("mesclada"):
+                        flash(
+                            f'Categoria unida em "{nome_cat}". '
+                            f'{qtd} lançamento(s) antigo(s) e novo(s) aparecem com esse nome no cartão e no dashboard.',
+                            'success',
+                        )
+                    else:
+                        flash(
+                            f'Categoria renomeada para "{nome_cat}". '
+                            f'{qtd} lançamento(s) vinculado(s) já exibem o nome novo.',
+                            'success',
+                        )
+                else:
+                    flash('Não foi possível atualizar a categoria.', 'warning')
+            return redirect(url_for('cartao', aba='categorias'))
+
+        elif action == 'excluir_categoria':
+            categoria_id = int(request.form.get('categoria_id', 0))
+            if categoria_id <= 0:
+                flash('Categoria inválida.', 'warning')
+            elif cartao_service.excluir_categoria(categoria_id):
+                flash('Categoria excluída. Lançamentos ficaram sem categoria.', 'success')
+            else:
+                flash('Não foi possível excluir a categoria.', 'warning')
+            return redirect(url_for('cartao', aba='categorias'))
+
         elif action == 'compra':
             descricao = request.form.get('descricao')
             valor_compra = _parse_brl_value(request.form.get('valor'), 0.0)
             pessoa_id_str = request.form.get('pessoa_id', '')
             pessoa_id = int(pessoa_id_str) if pessoa_id_str else None
+            categoria_id = _parse_categoria_id(request.form.get('categoria_id'))
             avista = request.form.get('tipo') == 'avista'
             total_parcelas = int(request.form.get('total_parcelas', 1))
             parcela_atual = int(request.form.get('parcela_atual', 1))
@@ -270,6 +330,9 @@ def cartao():
             
             if not descricao or valor_compra <= 0:
                 flash('Informe descrição e valor maior que zero.', 'warning')
+                return redirect(url_for('cartao'))
+            if categoria_id is not None and not cartao_service.categoria_existe(categoria_id):
+                flash('Categoria inválida.', 'warning')
                 return redirect(url_for('cartao'))
             if not avista:
                 if total_parcelas < 1:
@@ -286,12 +349,14 @@ def cartao():
                     pessoa_id,
                     mes_competencia,
                     ano_competencia,
+                    categoria_id,
                 )
             else:
                 valor_total = valor_compra * total_parcelas if modo_valor == 'parcela' else valor_compra
                 cartao_service.criar_parcelada(
                     descricao, valor_total, total_parcelas,
-                    mes_competencia, ano_competencia, pessoa_id, parcela_atual
+                    mes_competencia, ano_competencia, pessoa_id, parcela_atual,
+                    categoria_id,
                 )
             flash('Compra registrada com sucesso.', 'success')
             return redirect(url_for('cartao'))
@@ -321,6 +386,7 @@ def cartao():
             valor = _parse_brl_value(request.form.get('valor'), 0.0)
             pessoa_id_str = request.form.get('pessoa_id', '')
             pessoa_id = int(pessoa_id_str) if pessoa_id_str else None
+            categoria_id = _parse_categoria_id(request.form.get('categoria_id'))
             mes_competencia, ano_competencia = _normalizar_competencia(
                 request.form.get('mes_competencia'),
                 request.form.get('ano_competencia'),
@@ -331,6 +397,9 @@ def cartao():
             if lancamento_id <= 0 or not descricao or valor <= 0:
                 flash('Dados inválidos para edição.', 'warning')
                 return redirect(url_for('cartao'))
+            if categoria_id is not None and not cartao_service.categoria_existe(categoria_id):
+                flash('Categoria inválida.', 'warning')
+                return redirect(url_for('cartao'))
 
             if tipo == 'avista':
                 ok = cartao_service.atualizar_avista(
@@ -340,6 +409,7 @@ def cartao():
                     pessoa_id,
                     mes_competencia,
                     ano_competencia,
+                    categoria_id,
                 )
             elif tipo == 'parcelado':
                 total_parcelas = int(request.form.get('total_parcelas', 1))
@@ -362,12 +432,26 @@ def cartao():
                     pessoa_id,
                     mes_competencia,
                     ano_competencia,
+                    categoria_id,
                 )
             else:
                 ok = False
 
             if ok:
-                flash('Lançamento atualizado com sucesso.', 'success')
+                if categoria_id is not None:
+                    nomes_cat = {
+                        c.id: c.nome for c in cartao_service.listar_categorias()
+                    }
+                    nome_cat = nomes_cat.get(categoria_id, '')
+                    flash(
+                        f'Lançamento atualizado. Categoria salva: {nome_cat or categoria_id}.',
+                        'success',
+                    )
+                else:
+                    flash(
+                        'Lançamento atualizado. Categoria removida (sem categoria).',
+                        'success',
+                    )
             else:
                 flash('Não foi possível atualizar o lançamento.', 'warning')
             return redirect(url_for('cartao'))
@@ -386,6 +470,10 @@ def cartao():
     )
     info = cartao_service.calcular_fatura_competencia(mes_fatura_exibicao, ano_fatura_exibicao)
     pessoas = pessoas_service.listar_pessoas()
+    categorias = cartao_service.listar_categorias()
+    aba_ativa = (request.args.get('aba') or 'principal').strip().lower()
+    if aba_ativa not in {'principal', 'categorias', 'lancamentos'}:
+        aba_ativa = 'principal'
     lancamentos_todos = cartao_service.listar_todos_lancamentos()
     competencias = _listar_competencias(mes_comp_padrao, ano_comp_padrao)
     anos_competencia = sorted(
@@ -469,6 +557,8 @@ def cartao():
         exibindo_fatura_aberta=exibindo_fatura_aberta,
         sort_by=sort_by,
         sort_dir=sort_dir,
+        categorias=categorias,
+        aba_ativa=aba_ativa,
     )
 
 
@@ -783,7 +873,6 @@ def pessoas():
                     flash('Desconto não encontrado.', 'warning')
             return redirect(url_for('pessoas', mes=mes, ano=ano))
     
-    pessoas_list = pessoas_service.listar_pessoas(only_ativas=False) # Listar todas as pessoas para gerenciamento
     prioridades_nome = {"aila": 1, "raynne": 2}
 
     def _ordem_pessoa(p):
@@ -794,139 +883,69 @@ def pessoas():
             return (1, prioridades_nome[nome_norm], int(p.id))
         return (2, 0, int(p.id))
 
-    pessoas_list = sorted(pessoas_list, key=_ordem_pessoa)
-    totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(
-        mes, ano, mes_cartao_alt, ano_cartao_alt
-    )
-    resumos = []
-    for p in pessoas_list:
-        if p.padrao:
-            total_mes = 0.0
-            total_pago = 0.0
-            saldo_pend = 0.0
-        else:
-            info = totais_por_pessoa.get(p.id, {"total_mes": 0.0, "total_pago": 0.0, "saldo_pendente": 0.0})
-            total_mes = float(info["total_mes"])
-            total_pago = float(info["total_pago"])
-            saldo_pend = float(info["saldo_pendente"])
+    conn = get_connection()
+    try:
+        pessoas_list = sorted(
+            pessoas_service.listar_pessoas(only_ativas=False, conn=conn),
+            key=_ordem_pessoa,
+        )
+        totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(
+            mes, ano, mes_cartao_alt, ano_cartao_alt, conn=conn
+        )
+        resumos = []
+        for p in pessoas_list:
+            if p.padrao:
+                total_mes = 0.0
+                total_pago = 0.0
+                saldo_pend = 0.0
+            else:
+                info = totais_por_pessoa.get(p.id, {"total_mes": 0.0, "total_pago": 0.0, "saldo_pendente": 0.0})
+                total_mes = float(info["total_mes"])
+                total_pago = float(info["total_pago"])
+                saldo_pend = float(info["saldo_pendente"])
 
-        resumos.append({
-            'pessoa': p,
-            'total_mes': total_mes,
-            'total_pago': total_pago,
-            'saldo_pend': saldo_pend
-        })
+            resumos.append({
+                'pessoa': p,
+                'total_mes': total_mes,
+                'total_pago': total_pago,
+                'saldo_pend': saldo_pend
+            })
 
-    ids_padrao = {p.id for p in pessoas_list if p.padrao}
-    total_mes_geral = sum(
-        float(info.get("total_mes", 0.0))
-        for pid, info in totais_por_pessoa.items()
-        if pid not in ids_padrao
-    )
-    total_pago_geral = sum(
-        float(info.get("total_pago", 0.0))
-        for pid, info in totais_por_pessoa.items()
-        if pid not in ids_padrao
-    )
-    saldo_pend_geral = total_mes_geral - total_pago_geral
+        ids_padrao = {p.id for p in pessoas_list if p.padrao}
+        total_mes_geral = sum(
+            float(info.get("total_mes", 0.0))
+            for pid, info in totais_por_pessoa.items()
+            if pid not in ids_padrao
+        )
+        total_pago_geral = sum(
+            float(info.get("total_pago", 0.0))
+            for pid, info in totais_por_pessoa.items()
+            if pid not in ids_padrao
+        )
+        saldo_pend_geral = total_mes_geral - total_pago_geral
 
-    pessoas_ativas = [p for p in pessoas_list if p.ativo and not p.padrao]
-    ids_pessoas_ativas = {p.id for p in pessoas_ativas}
-    pessoa_ativa_id = request.args.get('pessoa_id', type=int)
-    if pessoa_ativa_id not in ids_pessoas_ativas:
-        pessoa_ativa_id = None
-    contas_status_por_pessoa_mes = {}
-    descontos_itens_por_pessoa_mes = {}
-    previsao_mes_por_pessoa = {}
-    pessoas_para_detalhe = [p for p in pessoas_ativas if p.id == pessoa_ativa_id] if pessoa_ativa_id else []
-    for p in pessoas_para_detalhe:
-        conn_pessoa = get_connection()
-        try:
-            previsao = pessoas_service.listar_previsao_contas_por_mes_pessoa(
-                p.id, mes, ano, mes_cartao_alt, ano_cartao_alt, conn=conn_pessoa
+        pessoas_ativas = [p for p in pessoas_list if p.ativo and not p.padrao]
+        ids_pessoas_ativas = {p.id for p in pessoas_ativas}
+        pessoa_ativa_id = request.args.get('pessoa_id', type=int)
+        if pessoa_ativa_id not in ids_pessoas_ativas:
+            pessoa_ativa_id = None
+        contas_status_por_pessoa_mes = {}
+        descontos_itens_por_pessoa_mes = {}
+        previsao_mes_por_pessoa = {}
+        if pessoa_ativa_id:
+            detalhe = pessoas_service.carregar_detalhe_pessoa_pagina(
+                pessoa_ativa_id,
+                mes,
+                ano,
+                mes_cartao_alt,
+                ano_cartao_alt,
+                conn=conn,
             )
-            meses_previsao = list(previsao.get("meses", []))
-            chaves_com_contas = set()
-            chave_mes_atual = f"{ano}-{mes:02d}"
-            chaves_com_contas.add(chave_mes_atual)
-            idx_limite = (ano * 12) + (mes - 1) + 11
-            for mref in meses_previsao:
-                m_ref = int(mref["mes"])
-                a_ref = int(mref["ano"])
-                chaves_com_contas.add(f"{a_ref}-{m_ref:02d}")
-                idx_limite = max(idx_limite, (a_ref * 12) + (m_ref - 1))
-
-            mes_fim = (idx_limite % 12) + 1
-            ano_fim = idx_limite // 12
-            descontos_por_mes = pessoas_service.listar_descontos_manuais_pessoa_intervalo(
-                p.id, mes, ano, mes_fim, ano_fim, conn=conn_pessoa
-            )
-
-            chaves_existentes = {f"{int(m['ano'])}-{int(m['mes']):02d}" for m in meses_previsao}
-            for chave_mes in descontos_por_mes.keys():
-                if chave_mes in chaves_existentes:
-                    continue
-                ano_chave, mes_chave = chave_mes.split("-")
-                meses_previsao.append(
-                    {
-                        "mes": int(mes_chave),
-                        "ano": int(ano_chave),
-                        "total": 0.0,
-                        "itens": [],
-                    }
-                )
-                chaves_existentes.add(chave_mes)
-
-            meses_previsao.sort(key=lambda x: (int(x["ano"]), int(x["mes"])))
-            previsao["meses"] = meses_previsao
-            total_contas_previsto = sum(float(m.get("total", 0.0)) for m in meses_previsao)
-            total_descontos_previsto = 0.0
-            for itens_desc in descontos_por_mes.values():
-                total_descontos_previsto += sum(float(d.get("valor", 0.0)) for d in itens_desc)
-            previsao["total_geral_liquido"] = max(total_contas_previsto - total_descontos_previsto, 0.0)
-            previsao_mes_por_pessoa[p.id] = previsao
-
-            mapa_mes = {}
-            mapa_descontos_mes = {}
-            refs = []
-            for chave in sorted(chaves_com_contas):
-                ano_ref, mes_ref = chave.split("-")
-                refs.append((int(mes_ref), int(ano_ref)))
-            mapa_mes_otimizado = pessoas_service.listar_contas_status_pessoa_meses(
-                p.id, refs, mes_cartao_alt, ano_cartao_alt, conn=conn_pessoa
-            )
-            if chave_mes_atual not in chaves_existentes:
-                itens_mes_atual = mapa_mes_otimizado.get(chave_mes_atual, [])
-                total_mes_atual = sum(float(item.get("valor", 0.0)) for item in itens_mes_atual)
-                meses_previsao.append(
-                    {
-                        "mes": mes,
-                        "ano": ano,
-                        "total": total_mes_atual,
-                        "itens": [
-                            {
-                                "descricao": str(item.get("descricao", "")),
-                                "valor": float(item.get("valor", 0.0)),
-                            }
-                            for item in itens_mes_atual
-                        ],
-                    }
-                )
-                meses_previsao.sort(key=lambda x: (int(x["ano"]), int(x["mes"])))
-                previsao["meses"] = meses_previsao
-                total_contas_previsto = sum(float(m.get("total", 0.0)) for m in meses_previsao)
-                previsao["total_geral"] = total_contas_previsto
-                previsao["total_geral_liquido"] = max(total_contas_previsto - total_descontos_previsto, 0.0)
-            for mref in previsao.get("meses", []):
-                m = int(mref["mes"])
-                a = int(mref["ano"])
-                chave = f"{a}-{m:02d}"
-                mapa_mes[chave] = mapa_mes_otimizado.get(chave, [])
-                mapa_descontos_mes[chave] = descontos_por_mes.get(chave, [])
-            contas_status_por_pessoa_mes[p.id] = mapa_mes
-            descontos_itens_por_pessoa_mes[p.id] = mapa_descontos_mes
-        finally:
-            conn_pessoa.close()
+            previsao_mes_por_pessoa[pessoa_ativa_id] = detalhe["previsao"]
+            contas_status_por_pessoa_mes[pessoa_ativa_id] = detalhe["contas_status_por_mes"]
+            descontos_itens_por_pessoa_mes[pessoa_ativa_id] = detalhe["descontos_itens_por_mes"]
+    finally:
+        conn.close()
 
     return render_template('pessoas.html',
         mes=mes, ano=ano,

@@ -6,17 +6,29 @@
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Cartão de Crédito</h1>
 {% set meses = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"] %}
 
+{% macro select_categoria(name, selected_id=None) %}
+<select name="{{ name }}">
+    <option value="" {% if selected_id is none %}selected{% endif %}>(Sem categoria)</option>
+    {% for cat in categorias %}
+    <option value="{{ cat.id }}" {% if selected_id is not none and selected_id|int == cat.id %}selected{% endif %}>{{ cat.nome }}</option>
+    {% endfor %}
+</select>
+{% endmacro %}
+
 <ul class="nav nav-tabs cartao-tabs" role="tablist">
     <li class="nav-item">
-        <a class="nav-link active" data-toggle="tab" href="#tab-cartao-principal" role="tab">Cartão de Crédito</a>
+        <a class="nav-link {% if aba_ativa == 'principal' %}active{% endif %}" data-toggle="tab" href="#tab-cartao-principal" role="tab">Cartão de Crédito</a>
     </li>
     <li class="nav-item">
-        <a class="nav-link" data-toggle="tab" href="#tab-cartao-lancamentos" role="tab">Todos os lançamentos</a>
+        <a class="nav-link {% if aba_ativa == 'categorias' %}active{% endif %}" data-toggle="tab" href="#tab-cartao-categorias" role="tab">Categorias</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if aba_ativa == 'lancamentos' %}active{% endif %}" data-toggle="tab" href="#tab-cartao-lancamentos" role="tab">Todos os lançamentos</a>
     </li>
 </ul>
 
 <div class="tab-content cartao-tab-content">
-<div class="tab-pane fade show active" id="tab-cartao-principal" role="tabpanel">
+<div class="tab-pane fade {% if aba_ativa == 'principal' %}show active{% endif %}" id="tab-cartao-principal" role="tabpanel">
 
 <!-- Configuração -->
 <section class="cartao-section cartao-section-config">
@@ -169,6 +181,12 @@
         </div>
         <div class="col-3">
             <div class="form-group">
+                <label>Categoria</label>
+                {{ select_categoria('categoria_id') }}
+            </div>
+        </div>
+        <div class="col-3">
+            <div class="form-group">
                 <label>Tipo</label>
                 <select name="tipo" id="tipo_compra" onchange="toggleParcelas()">
                     <option value="avista">À vista</option>
@@ -224,7 +242,74 @@
 
 </div>
 
-<div class="tab-pane fade" id="tab-cartao-lancamentos" role="tabpanel">
+<div class="tab-pane fade {% if aba_ativa == 'categorias' %}show active{% endif %}" id="tab-cartao-categorias" role="tabpanel">
+    <section class="cartao-section cartao-section-categorias">
+        <div class="section-title">Nova categoria</div>
+        <form method="POST" class="compact-person-form" style="margin-bottom: 1rem;">
+            <input type="hidden" name="action" value="nova_categoria">
+            <div class="row form-row">
+                <div class="col-4">
+                    <div class="form-group">
+                        <label>Nome da categoria</label>
+                        <input type="text" name="nome" required placeholder="Ex.: Alimentação">
+                    </div>
+                </div>
+                <div class="col-2 form-action-col">
+                    <button type="submit" class="btn btn-primary">Cadastrar categoria</button>
+                </div>
+            </div>
+        </form>
+
+        <div class="section-title">Categorias cadastradas</div>
+        {% if categorias %}
+        <div class="table table-blue">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cat in categorias %}
+                    <tr>
+                        <td>{{ cat.nome }}</td>
+                        <td>
+                            <button class="btn btn-warning btn-sm" type="button" data-toggle="collapse" data-target="#editar-categoria-{{ cat.id }}" title="Editar">&#9998;</button>
+                            <form method="POST" style="display:inline;">
+                                <input type="hidden" name="action" value="excluir_categoria">
+                                <input type="hidden" name="categoria_id" value="{{ cat.id }}">
+                                <button type="submit" class="btn btn-danger btn-sm" title="Excluir" onclick="return confirm('Excluir esta categoria? Os lançamentos ficarão sem categoria.');">&#128465;</button>
+                            </form>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="editar-categoria-{{ cat.id }}">
+                        <td colspan="2">
+                            <form method="POST" class="p-3 border rounded bg-light mb-2">
+                                <input type="hidden" name="action" value="editar_categoria">
+                                <input type="hidden" name="categoria_id" value="{{ cat.id }}">
+                                <div class="form-group">
+                                    <label>Novo nome</label>
+                                    <input type="text" class="form-control" name="nome" value="{{ cat.nome }}" required>
+                                    <small class="form-text text-muted">
+                                        Todos os lançamentos (inclusive antigos) desta categoria passam a mostrar o nome novo no cartão e no dashboard.
+                                    </small>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>Nenhuma categoria cadastrada. Crie a primeira acima ou elas serão criadas ao cadastrar compras.</p>
+        {% endif %}
+    </section>
+</div>
+
+<div class="tab-pane fade {% if aba_ativa == 'lancamentos' %}show active{% endif %}" id="tab-cartao-lancamentos" role="tabpanel">
     <section class="cartao-section cartao-section-lancamentos">
     <div class="section-title">Todos os lançamentos</div>
     {% if lancamentos_por_competencia %}
@@ -246,6 +331,7 @@
                         <tr>
                             <th>Tipo</th>
                             <th>Descrição</th>
+                            <th>Categoria</th>
                             <th>Valor</th>
                             <th>Parcelas</th>
                             <th>
@@ -262,6 +348,7 @@
                         <tr>
                             <td>{% if l.tipo == 'avista' %}À vista{% else %}Parcelado{% endif %}</td>
                             <td>{{ l.descricao }}</td>
+                            <td>{{ l.categoria_nome or '-' }}</td>
                             <td>R$ {{ "{:,.2f}".format(l.valor) }}</td>
                             <td>{{ l.parcelas_label }}</td>
                             <td>{{ l.pessoa_nome }}</td>
@@ -288,7 +375,7 @@
                             </td>
                         </tr>
                         <tr class="collapse" id="editar-cartao-{{ l.ui_key }}">
-                            <td colspan="7">
+                            <td colspan="8">
                                 <form method="POST">
                                     <input type="hidden" name="action" value="editar_lancamento">
                                     <input type="hidden" name="tipo" value="{{ l.tipo }}">
@@ -315,6 +402,13 @@
                                                         <option value="{{ p.id }}" {% if p.id == l.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
                                                     {% endfor %}
                                                 </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-2">
+                                            <div class="form-group">
+                                                <label>Categoria</label>
+                                                {{ select_categoria('categoria_id', l.categoria_id) }}
+                                                <small class="form-text text-muted">Ao salvar, a categoria escolhida substitui a anterior.</small>
                                             </div>
                                         </div>
                                         <div class="col-2">
