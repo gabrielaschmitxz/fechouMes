@@ -445,6 +445,182 @@ body {
     color: #1e3a8a;
 }
 
+.lancamentos-comp-nav {
+    margin-bottom: 1rem;
+}
+
+.lancamentos-comp-nav-mobile {
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.lancamentos-comp-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 1rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid #93c5fd;
+    border-radius: 8px;
+    background: #f8fbff;
+    color: #1e3a8a;
+}
+
+.lancamentos-comp-arrow {
+    flex: 0 0 auto;
+    min-width: 2.5rem;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+}
+
+.lancamentos-comp-arrow.disabled {
+    pointer-events: none;
+    opacity: 0.45;
+}
+
+.lancamentos-comp-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    margin-bottom: 0.85rem;
+}
+
+.lancamentos-comp-titulo {
+    margin: 0;
+    font-size: 1.15rem;
+    color: #1e3a8a;
+}
+
+.lancamentos-sort-link {
+    font-size: 0.9rem;
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.lancamentos-sort-link:hover {
+    text-decoration: underline;
+}
+
+.lancamentos-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.lancamento-card {
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    background: #fff;
+    padding: 0.85rem 0.9rem;
+    box-shadow: 0 1px 4px rgba(30, 58, 138, 0.06);
+}
+
+.lancamento-card-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.65rem;
+}
+
+.lancamento-card-main {
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+
+.lancamento-tipo-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    margin-bottom: 0.35rem;
+}
+
+.lancamento-tipo-badge.tipo-avista {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.lancamento-tipo-badge.tipo-parcelado {
+    background: #ffedd5;
+    color: #c2410c;
+}
+
+.lancamento-descricao {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    line-height: 1.35;
+    color: #1f2937;
+    word-break: break-word;
+}
+
+.lancamento-valor {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #1e3a8a;
+}
+
+.lancamento-card-acoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex: 0 0 auto;
+}
+
+.lancamento-excluir-form {
+    display: inline;
+    margin: 0;
+}
+
+.lancamento-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem 0.75rem;
+    margin: 0.75rem 0 0;
+    padding: 0.65rem 0 0;
+    border-top: 1px solid #e2e8f0;
+}
+
+.lancamento-meta > div {
+    min-width: 0;
+}
+
+.lancamento-meta dt {
+    margin: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.lancamento-meta dd {
+    margin: 0.1rem 0 0;
+    font-size: 0.9rem;
+    color: #334155;
+    word-break: break-word;
+}
+
+.lancamento-edit-panel {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px dashed #cbd5e1;
+}
+
+.lancamento-edit-form .form-group {
+    margin-bottom: 0.65rem;
+}
+
+.lancamentos-vazio {
+    margin: 0;
+    color: #64748b;
+}
+
 .cartao-section-divider {
     height: 1rem;
 }
@@ -1030,6 +1206,39 @@ body {
     .form-row .form-action-col .btn {
         width: 100%;
     }
+    .lancamentos-comp-nav-mobile {
+        display: flex;
+    }
+
+    .lancamentos-comp-tabs-desktop {
+        display: none !important;
+    }
+
+    .lancamentos-comp-titulo {
+        font-size: 1.05rem;
+    }
+
+    .lancamento-card {
+        padding: 0.75rem;
+    }
+
+    .lancamento-card-acoes {
+        width: 100%;
+    }
+
+    .lancamento-card-acoes .btn {
+        flex: 1 1 calc(50% - 0.25rem);
+        min-height: 2.5rem;
+    }
+
+    .lancamento-meta {
+        grid-template-columns: 1fr;
+    }
+
+    .lancamento-edit-form .form-action-col .btn {
+        width: 100%;
+    }
+
     .form-row .btn,
     .compact-person-form .btn {
         width: 100%;

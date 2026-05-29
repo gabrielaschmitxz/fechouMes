@@ -623,6 +623,8 @@ def obter_conta_fixa_por_id(conta_id: int, conn=None) -> ContaFixa | None:
 
 
 def marcar_conta_como_paga(conta_id: int) -> bool:
+    from finance_app.services import pessoas_service
+
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
@@ -637,6 +639,8 @@ def marcar_conta_como_paga(conta_id: int) -> bool:
         (conta_id,),
     )
     ok = cur.rowcount > 0
+    if ok:
+        pessoas_service.sincronizar_pagamento_pessoa_conta_fixa(conta_id, conn=conn)
     conn.commit()
     conn.close()
     return ok

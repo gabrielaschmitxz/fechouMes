@@ -15,6 +15,102 @@
 </select>
 {% endmacro %}
 
+{% macro url_cartao_lancamentos(mes_lanc, ano_lanc) -%}
+{{ url_for('cartao', aba='lancamentos', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lanc, ano_lancamento=ano_lanc, sort_by=sort_by or none, sort_dir=sort_dir if sort_by else none) }}
+{%- endmacro %}
+
+{% macro cartao_retorno_lancamentos() %}
+<input type="hidden" name="ret_aba" value="lancamentos">
+<input type="hidden" name="ret_mes_fatura" value="{{ mes_fatura_exibicao }}">
+<input type="hidden" name="ret_ano_fatura" value="{{ ano_fatura_exibicao }}">
+<input type="hidden" name="ret_mes_lancamento" value="{{ mes_lancamento_exibicao }}">
+<input type="hidden" name="ret_ano_lancamento" value="{{ ano_lancamento_exibicao }}">
+{% if sort_by %}
+<input type="hidden" name="ret_sort_by" value="{{ sort_by }}">
+<input type="hidden" name="ret_sort_dir" value="{{ sort_dir }}">
+{% endif %}
+{% endmacro %}
+
+{% macro form_editar_lancamento(l) %}
+<form method="POST" class="lancamento-edit-form">
+    {{ cartao_retorno_lancamentos() }}
+    <input type="hidden" name="action" value="editar_lancamento">
+    <input type="hidden" name="tipo" value="{{ l.tipo }}">
+    <input type="hidden" name="lancamento_id" value="{{ l.id }}">
+    <div class="row form-row">
+        <div class="col-12 col-md-6">
+            <div class="form-group">
+                <label>Descrição</label>
+                <input type="text" name="descricao" value="{{ l.descricao }}" required>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="form-group">
+                <label>{% if l.tipo == 'parcelado' %}Valor parcela (R$){% else %}Valor (R$){% endif %}</label>
+                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" value="{{ '%.2f'|format(l.valor) }}" required>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="form-group">
+                <label>Pessoa</label>
+                <select name="pessoa_id">
+                    <option value="" {% if l.pessoa_id is none %}selected{% endif %}>(Nosso)</option>
+                    {% for p in pessoas %}
+                        <option value="{{ p.id }}" {% if p.id == l.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="form-group">
+                <label>Categoria</label>
+                {{ select_categoria('categoria_id', l.categoria_id) }}
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="form-group">
+                <label>{% if l.tipo == 'parcelado' %}1ª parcela (mês){% else %}Competência (mês){% endif %}</label>
+                <select name="mes_competencia" required>
+                    {% for m in range(1, 13) %}
+                        <option value="{{ m }}" {% if m == (l.mes_inicio if l.tipo == 'parcelado' else l.mes_ref) %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="form-group">
+                <label>{% if l.tipo == 'parcelado' %}Ano da 1ª parcela{% else %}Ano{% endif %}</label>
+                <select name="ano_competencia" required>
+                    {% for a in anos_competencia %}
+                        <option value="{{ a }}" {% if a == (l.ano_inicio if l.tipo == 'parcelado' else l.ano_ref) %}selected{% endif %}>{{ a }}</option>
+                    {% endfor %}
+                </select>
+                {% if l.tipo == 'parcelado' %}
+                <small class="form-text text-muted">Esta linha em {{ l.periodo }} é a parcela {{ l.parcelas_label }}.</small>
+                {% endif %}
+            </div>
+        </div>
+        {% if l.tipo == 'parcelado' %}
+        <div class="col-6 col-md-2">
+            <div class="form-group">
+                <label>Parcela atual</label>
+                <input type="number" name="parcela_atual" min="1" value="{{ l.parcela_atual }}" required>
+            </div>
+        </div>
+        <div class="col-6 col-md-2">
+            <div class="form-group">
+                <label>Total parcelas</label>
+                <input type="number" name="total_parcelas" min="1" value="{{ l.total_parcelas }}" required>
+            </div>
+        </div>
+        {% endif %}
+        <div class="col-12 form-action-col">
+            <button type="submit" class="btn btn-primary">Salvar alterações</button>
+        </div>
+    </div>
+</form>
+{% endmacro %}
+
 <ul class="nav nav-tabs cartao-tabs" role="tablist">
     <li class="nav-item">
         <a class="nav-link {% if aba_ativa == 'principal' %}active{% endif %}" data-toggle="tab" href="#tab-cartao-principal" role="tab">Cartão de Crédito</a>
@@ -23,7 +119,7 @@
         <a class="nav-link {% if aba_ativa == 'categorias' %}active{% endif %}" data-toggle="tab" href="#tab-cartao-categorias" role="tab">Categorias</a>
     </li>
     <li class="nav-item">
-        <a class="nav-link {% if aba_ativa == 'lancamentos' %}active{% endif %}" data-toggle="tab" href="#tab-cartao-lancamentos" role="tab">Todos os lançamentos</a>
+        <a class="nav-link {% if aba_ativa == 'lancamentos' %}active{% endif %}" href="{{ url_for('cartao', aba='lancamentos', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lancamento_exibicao, ano_lancamento=ano_lancamento_exibicao) }}">Todos os lançamentos</a>
     </li>
 </ul>
 
@@ -312,153 +408,89 @@
 <div class="tab-pane fade {% if aba_ativa == 'lancamentos' %}show active{% endif %}" id="tab-cartao-lancamentos" role="tabpanel">
     <section class="cartao-section cartao-section-lancamentos">
     <div class="section-title">Todos os lançamentos</div>
-    {% if lancamentos_por_competencia %}
-    <ul class="nav nav-tabs cartao-tabs" role="tablist" style="margin-bottom: 0.75rem;">
-        {% for grupo in lancamentos_por_competencia %}
-        <li class="nav-item">
-            <a class="nav-link {% if grupo.chave == (ano_lancamento_exibicao, mes_lancamento_exibicao) %}active{% endif %}" data-toggle="tab" href="#tab-competencia-{{ loop.index }}" role="tab">
-                {{ grupo.titulo }}
-            </a>
-        </li>
-        {% endfor %}
-    </ul>
-    <div class="tab-content cartao-tab-content">
-        {% for grupo in lancamentos_por_competencia %}
-        <div class="tab-pane fade {% if grupo.chave == (ano_lancamento_exibicao, mes_lancamento_exibicao) %}show active{% endif %}" id="tab-competencia-{{ loop.index }}" role="tabpanel">
-            <div class="table table-blue" style="margin-bottom: 1rem;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tipo</th>
-                            <th>Descrição</th>
-                            <th>Categoria</th>
-                            <th>Valor</th>
-                            <th>Parcelas</th>
-                            <th>
-                                <a href="{{ url_for('cartao', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lancamento_exibicao, ano_lancamento=ano_lancamento_exibicao, sort_by='pessoa', sort_dir='desc' if sort_by == 'pessoa' and sort_dir == 'asc' else 'asc') }}" style="color: inherit; text-decoration: none;">
-                                    Pessoa ^
-                                </a>
-                            </th>
-                            <th>Competência</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for l in grupo.lancamentos %}
-                        <tr>
-                            <td>{% if l.tipo == 'avista' %}À vista{% else %}Parcelado{% endif %}</td>
-                            <td>{{ l.descricao }}</td>
-                            <td>{{ l.categoria_nome or '-' }}</td>
-                            <td>R$ {{ "{:,.2f}".format(l.valor) }}</td>
-                            <td>{{ l.parcelas_label }}</td>
-                            <td>{{ l.pessoa_nome }}</td>
-                            <td>{{ l.periodo }}</td>
-                            <td>
-                                <div class="acoes-inline">
-                                <button
-                                    type="button"
-                                    class="btn btn-warning btn-sm"
-                                    data-toggle="collapse"
-                                    data-target="#editar-cartao-{{ l.ui_key }}"
-                                    aria-expanded="false"
-                                    aria-controls="editar-cartao-{{ l.ui_key }}"
-                                    title="Editar">
-                                    &#9998;
-                                </button>
-                                <form method="POST" style="display:inline;">
-                                    <input type="hidden" name="action" value="excluir_lancamento">
-                                    <input type="hidden" name="tipo" value="{{ l.tipo }}">
-                                    <input type="hidden" name="lancamento_id" value="{{ l.id }}">
-                                    <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
-                                </form>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr class="collapse" id="editar-cartao-{{ l.ui_key }}">
-                            <td colspan="8">
-                                <form method="POST">
-                                    <input type="hidden" name="action" value="editar_lancamento">
-                                    <input type="hidden" name="tipo" value="{{ l.tipo }}">
-                                    <input type="hidden" name="lancamento_id" value="{{ l.id }}">
-                                    <div class="row form-row">
-                                        <div class="col-3">
-                                            <div class="form-group">
-                                                <label>Descrição</label>
-                                                <input type="text" name="descricao" value="{{ l.descricao }}" required>
-                                            </div>
-                                        </div>
-                                        <div class="col-2">
-                                            <div class="form-group">
-                                                <label>{% if l.tipo == 'parcelado' %}Valor parcela (R$){% else %}Valor (R$){% endif %}</label>
-                                                <input type="text" class="money-input" inputmode="numeric" autocomplete="off" name="valor" value="{{ '%.2f'|format(l.valor) }}" required>
-                                            </div>
-                                        </div>
-                                        <div class="col-2">
-                                            <div class="form-group">
-                                                <label>Pessoa</label>
-                                                <select name="pessoa_id">
-                                                    <option value="" {% if l.pessoa_id is none %}selected{% endif %}>(Nosso)</option>
-                                                    {% for p in pessoas %}
-                                                        <option value="{{ p.id }}" {% if p.id == l.pessoa_id %}selected{% endif %}>{{ p.nome }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-2">
-                                            <div class="form-group">
-                                                <label>Categoria</label>
-                                                {{ select_categoria('categoria_id', l.categoria_id) }}
-                                                <small class="form-text text-muted">Ao salvar, a categoria escolhida substitui a anterior.</small>
-                                            </div>
-                                        </div>
-                                        <div class="col-2">
-                                            <div class="form-group">
-                                                <label>Competência (mês)</label>
-                                                <select name="mes_competencia" required>
-                                                    {% for m in range(1, 13) %}
-                                                        <option value="{{ m }}" {% if m == (l.mes_inicio if l.tipo == 'parcelado' else l.mes_ref) %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-1">
-                                            <div class="form-group">
-                                                <label>Ano</label>
-                                                <select name="ano_competencia" required>
-                                                    {% for a in anos_competencia %}
-                                                        <option value="{{ a }}" {% if a == (l.ano_inicio if l.tipo == 'parcelado' else l.ano_ref) %}selected{% endif %}>{{ a }}</option>
-                                                    {% endfor %}
-                                                </select>
-                                            </div>
-                                        </div>
-                                        {% if l.tipo == 'parcelado' %}
-                                        <div class="col-1">
-                                            <div class="form-group">
-                                                <label>Parcela atual</label>
-                                                <input type="number" name="parcela_atual" min="1" value="{{ l.parcela_atual }}" required>
-                                            </div>
-                                        </div>
-                                        <div class="col-1">
-                                            <div class="form-group">
-                                                <label>Total</label>
-                                                <input type="number" name="total_parcelas" min="1" value="{{ l.total_parcelas }}" required>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                        <div class="col-1 form-action-col">
-                                            <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
-                                        </div>
-                                    </div>
-                                </form>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+    {% if lancamentos_por_competencia and grupo_lancamentos_ativo %}
+    <div class="lancamentos-comp-nav">
+        <div class="lancamentos-comp-nav-mobile">
+            {% if competencia_lanc_anterior %}
+            <a class="btn btn-outline-primary btn-sm lancamentos-comp-arrow" href="{{ url_cartao_lancamentos(competencia_lanc_anterior.chave[1], competencia_lanc_anterior.chave[0]) }}" title="Competência anterior">&#8249;</a>
+            {% else %}
+            <span class="btn btn-outline-secondary btn-sm lancamentos-comp-arrow disabled" aria-hidden="true">&#8249;</span>
+            {% endif %}
+            <select class="lancamentos-comp-select" aria-label="Competência" onchange="if (this.value) window.location.href = this.value;">
+                {% for grupo in lancamentos_por_competencia %}
+                <option value="{{ url_cartao_lancamentos(grupo.chave[1], grupo.chave[0]) }}" {% if grupo.chave == (ano_lancamento_exibicao, mes_lancamento_exibicao) %}selected{% endif %}>{{ grupo.titulo }}</option>
+                {% endfor %}
+            </select>
+            {% if competencia_lanc_proxima %}
+            <a class="btn btn-outline-primary btn-sm lancamentos-comp-arrow" href="{{ url_cartao_lancamentos(competencia_lanc_proxima.chave[1], competencia_lanc_proxima.chave[0]) }}" title="Próxima competência">&#8250;</a>
+            {% else %}
+            <span class="btn btn-outline-secondary btn-sm lancamentos-comp-arrow disabled" aria-hidden="true">&#8250;</span>
+            {% endif %}
         </div>
+        <ul class="nav nav-tabs cartao-tabs lancamentos-comp-tabs-desktop" role="tablist">
+            {% for grupo in lancamentos_por_competencia %}
+            <li class="nav-item">
+                <a class="nav-link {% if grupo.chave == (ano_lancamento_exibicao, mes_lancamento_exibicao) %}active{% endif %}" href="{{ url_cartao_lancamentos(grupo.chave[1], grupo.chave[0]) }}">
+                    {{ grupo.titulo }}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div class="lancamentos-comp-header">
+        <h3 class="lancamentos-comp-titulo">{{ grupo_lancamentos_ativo.titulo }}</h3>
+        <a class="lancamentos-sort-link" href="{{ url_for('cartao', aba='lancamentos', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lancamento_exibicao, ano_lancamento=ano_lancamento_exibicao, sort_by='pessoa', sort_dir='desc' if sort_by == 'pessoa' and sort_dir == 'asc' else 'asc') }}">
+            Ordenar por pessoa {% if sort_by == 'pessoa' %}{% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
+        </a>
+    </div>
+
+    <div class="lancamentos-list">
+        {% for l in grupo_lancamentos_ativo.lancamentos %}
+        <article class="lancamento-card" id="lancamento-{{ l.ui_key }}">
+            <div class="lancamento-card-top">
+                <div class="lancamento-card-main">
+                    <span class="lancamento-tipo-badge {% if l.tipo == 'avista' %}tipo-avista{% else %}tipo-parcelado{% endif %}">
+                        {% if l.tipo == 'avista' %}À vista{% else %}Parcelado{% endif %}
+                    </span>
+                    <h4 class="lancamento-descricao">{{ l.descricao }}</h4>
+                    <p class="lancamento-valor">R$ {{ "{:,.2f}".format(l.valor) }}</p>
+                </div>
+                <div class="lancamento-card-acoes">
+                    <button
+                        type="button"
+                        class="btn btn-warning btn-sm"
+                        data-toggle="collapse"
+                        data-target="#editar-cartao-{{ l.ui_key }}"
+                        aria-expanded="false"
+                        aria-controls="editar-cartao-{{ l.ui_key }}">
+                        Editar
+                    </button>
+                    <form method="POST" class="lancamento-excluir-form" onsubmit="return confirm('Excluir este lançamento?');">
+                        {{ cartao_retorno_lancamentos() }}
+                        <input type="hidden" name="action" value="excluir_lancamento">
+                        <input type="hidden" name="tipo" value="{{ l.tipo }}">
+                        <input type="hidden" name="lancamento_id" value="{{ l.id }}">
+                        <button type="submit" class="btn btn-danger btn-sm">Excluir</button>
+                    </form>
+                </div>
+            </div>
+            <dl class="lancamento-meta">
+                <div><dt>Categoria</dt><dd>{{ l.categoria_nome or '—' }}</dd></div>
+                <div><dt>Pessoa</dt><dd>{{ l.pessoa_nome }}</dd></div>
+                <div><dt>Parcelas</dt><dd>{{ l.parcelas_label }}</dd></div>
+                <div><dt>Competência</dt><dd>{{ l.periodo }}</dd></div>
+            </dl>
+            <div class="collapse lancamento-edit-panel" id="editar-cartao-{{ l.ui_key }}">
+                {{ form_editar_lancamento(l) }}
+            </div>
+        </article>
+        {% else %}
+        <p class="lancamentos-vazio">Nenhum lançamento nesta competência.</p>
         {% endfor %}
     </div>
+    {% elif lancamentos_por_competencia %}
+    <p>Selecione uma competência acima.</p>
     {% else %}
     <p>Nenhum lançamento encontrado.</p>
     {% endif %}

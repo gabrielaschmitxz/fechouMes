@@ -621,6 +621,154 @@ def _chave_serie_conta_fixa(
     return nome_key, data_fim_key, valor_key
 
 
+def _status_conta_fixa_pago(status: object | None) -> bool:
+    return str(status or "").strip().lower() == "pago"
+
+
+def _obter_inicio_serie_conta_fixa(
+    cur,
+    nome: object,
+    data_fim: object,
+    valor: object,
+    mes_fallback: int,
+    ano_fallback: int,
+) -> Tuple[int, int]:
+    chave = _chave_serie_conta_fixa(nome, data_fim, valor)
+    cur.execute(
+        """
+        SELECT nome, data_fim, valor_padrao, mes_referencia, ano_referencia
+        FROM contas_fixas
+        WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?));
+        """,
+        (str(nome or "").strip(),),
+    )
+    inicio: Tuple[int, int] | None = None
+    for r in cur.fetchall():
+        if _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor_padrao"]) != chave:
+            continue
+        cand = (int(r["mes_referencia"]), int(r["ano_referencia"]))
+        if inicio is None or _indice_competencia(*cand) < _indice_competencia(*inicio):
+            inicio = cand
+    return inicio if inicio is not None else (int(mes_fallback), int(ano_fallback))
+
+
+def sincronizar_pagamento_pessoa_conta_fixa(conta_id: int, conn=None) -> bool:
+    """Registra pagamento de terceiro ao marcar conta fixa como paga (espelha fluxo da tela Pessoas)."""
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+
+    cur.execute(
+        """
+        SELECT id, nome, valor_padrao, desconto_pessoa_nome,
+               mes_referencia, ano_referencia, vencimento_data, data_fim, status
+        FROM contas_fixas
+        WHERE id = ?;
+        """,
+        (int(conta_id),),
+    )
+    row = cur.fetchone()
+    if not row or not _status_conta_fixa_pago(row["status"]):
+        if close_conn:
+            conn_local.close()
+        return False
+
+    nome_pessoa = (row["desconto_pessoa_nome"] or "").strip()
+    if not nome_pessoa:
+        if close_conn:
+            conn_local.close()
+        return False
+
+    cur.execute(
+        """
+        SELECT id FROM pessoas
+        WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?))
+        LIMIT 1;
+        """,
+        (nome_pessoa,),
+    )
+    pessoa_row = cur.fetchone()
+    if not pessoa_row:
+        if close_conn:
+            conn_local.close()
+        return False
+
+    pessoa_id = int(pessoa_row["id"])
+    mes_db = int(row["mes_referencia"])
+    ano_db = int(row["ano_referencia"])
+    mes_cf, ano_cf = _competencia_conta_fixa(mes_db, ano_db, row["vencimento_data"])
+    valor = float(row["valor_padrao"] or 0)
+
+    cur.execute(
+        """
+        SELECT 1
+        FROM pagamentos_terceiros_itens
+        WHERE pessoa_id = ?
+          AND tipo = 'conta_fixa'
+          AND item_id = ?
+          AND mes_referencia = ?
+          AND ano_referencia = ?;
+        """,
+        (pessoa_id, int(conta_id), mes_cf, ano_cf),
+    )
+    if cur.fetchone():
+        if close_conn:
+            conn_local.close()
+        return True
+
+    mes_inicio, ano_inicio = _obter_inicio_serie_conta_fixa(
+        cur, row["nome"], row["data_fim"], row["valor_padrao"], mes_db, ano_db
+    )
+    descricao_item = _descricao_conta_fixa(
+        row["nome"], mes_cf, ano_cf, mes_inicio, ano_inicio, row["data_fim"]
+    )
+    descricao_pagamento = f"Conta fixa paga: {descricao_item}"
+
+    if USE_POSTGRES:
+        cur.execute(
+            """
+            INSERT INTO pagamentos_terceiros
+            (pessoa_id, valor, descricao, mes_referencia, ano_referencia)
+            VALUES (?, ?, ?, ?, ?)
+            RETURNING id;
+            """,
+            (pessoa_id, valor, descricao_pagamento, mes_cf, ano_cf),
+        )
+        pagamento_id = int(cur.fetchone()["id"])
+    else:
+        cur.execute(
+            """
+            INSERT INTO pagamentos_terceiros
+            (pessoa_id, valor, descricao, mes_referencia, ano_referencia)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (pessoa_id, valor, descricao_pagamento, mes_cf, ano_cf),
+        )
+        pagamento_id = int(cur.lastrowid)
+
+    cur.execute(
+        """
+        INSERT INTO pagamentos_terceiros_itens
+        (pagamento_id, pessoa_id, tipo, item_id, descricao_item, valor, mes_referencia, ano_referencia)
+        VALUES (?, ?, 'conta_fixa', ?, ?, ?, ?, ?);
+        """,
+        (
+            pagamento_id,
+            pessoa_id,
+            int(conta_id),
+            descricao_item,
+            valor,
+            mes_cf,
+            ano_cf,
+        ),
+    )
+
+    if close_conn:
+        conn_local.commit()
+        conn_local.close()
+    return True
+
+
 def _descricao_pagamento_parcelada(texto: object | None) -> str:
     descricao = str(texto or "").strip()
     return descricao or "Cartão parcelado"
@@ -1052,7 +1200,10 @@ def listar_contas_status_pessoa_meses(
                 continue
             chave = f"{a_cf}-{m_cf:02d}"
             item_id = int(r["id"])
-            pago = bool(str(r["status"]) == "Pago" or ("conta_fixa", item_id, m_cf, a_cf) in pagos_keys)
+            pago = bool(
+                _status_conta_fixa_pago(r["status"])
+                or ("conta_fixa", item_id, m_cf, a_cf) in pagos_keys
+            )
             mes_inicio_serie, ano_inicio_serie = inicio_serie_por_chave.get(
                 _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor_padrao"]),
                 (int(r["mes_referencia"]), int(r["ano_referencia"])),
@@ -1715,7 +1866,7 @@ def calcular_totais_por_pessoa(
             continue
         pid = int(row["pessoa_id"])
         conta_id = int(row["conta_id"])
-        status_pago = str(row["status"]) == "Pago"
+        status_pago = _status_conta_fixa_pago(row["status"])
         pago_por_item = (pid, "conta_fixa", conta_id) in pagos_mes_keys
         if status_pago or pago_por_item:
             _add_pago(pid, float(row["valor_padrao"]))

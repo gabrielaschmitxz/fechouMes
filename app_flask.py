@@ -97,6 +97,38 @@ def _parse_categoria_id(raw_value) -> int | None:
     return categoria_id if categoria_id > 0 else None
 
 
+def _cartao_redirect_params(default_aba: str = "principal") -> dict:
+    """Preserva aba, competências e ordenação após POST na tela do cartão."""
+    aba = (request.form.get("ret_aba") or request.args.get("aba") or default_aba).strip().lower()
+    if aba not in {"principal", "categorias", "lancamentos"}:
+        aba = default_aba
+
+    params: dict = {"aba": aba}
+    for key in (
+        "mes_fatura",
+        "ano_fatura",
+        "mes_lancamento",
+        "ano_lancamento",
+        "sort_by",
+        "sort_dir",
+    ):
+        valor = request.form.get(f"ret_{key}") or request.args.get(key)
+        if valor is None or str(valor).strip() == "":
+            continue
+        if key in {"mes_fatura", "ano_fatura", "mes_lancamento", "ano_lancamento"}:
+            try:
+                params[key] = int(valor)
+            except (TypeError, ValueError):
+                continue
+        else:
+            params[key] = str(valor).strip()
+    return params
+
+
+def _redirect_cartao(default_aba: str = "principal"):
+    return redirect(url_for("cartao", **_cartao_redirect_params(default_aba)))
+
+
 def _parse_brl_value(raw_value, default=0.0):
     if raw_value is None:
         return default
@@ -366,7 +398,7 @@ def cartao():
             lancamento_id = int(request.form.get('lancamento_id', 0))
             if lancamento_id <= 0:
                 flash('Lançamento inválido.', 'warning')
-                return redirect(url_for('cartao'))
+                return _redirect_cartao('lancamentos')
             if tipo == 'avista':
                 ok = cartao_service.excluir_avista(lancamento_id)
             elif tipo == 'parcelado':
@@ -377,7 +409,7 @@ def cartao():
                 flash('Lançamento excluído com sucesso.', 'success')
             else:
                 flash('Não foi possível excluir o lançamento.', 'warning')
-            return redirect(url_for('cartao'))
+            return _redirect_cartao('lancamentos')
 
         elif action == 'editar_lancamento':
             tipo = (request.form.get('tipo') or '').strip().lower()
@@ -396,10 +428,10 @@ def cartao():
 
             if lancamento_id <= 0 or not descricao or valor <= 0:
                 flash('Dados inválidos para edição.', 'warning')
-                return redirect(url_for('cartao'))
+                return _redirect_cartao('lancamentos')
             if categoria_id is not None and not cartao_service.categoria_existe(categoria_id):
                 flash('Categoria inválida.', 'warning')
-                return redirect(url_for('cartao'))
+                return _redirect_cartao('lancamentos')
 
             if tipo == 'avista':
                 ok = cartao_service.atualizar_avista(
@@ -418,10 +450,10 @@ def cartao():
                 status = status_raw.strip().capitalize() if status_raw else None
                 if total_parcelas < 1 or parcela_atual < 1 or parcela_atual > total_parcelas:
                     flash('Parcela atual deve estar entre 1 e o total de parcelas.', 'warning')
-                    return redirect(url_for('cartao'))
+                    return _redirect_cartao('lancamentos')
                 if status is not None and status not in {'Ativa', 'Finalizada'}:
                     flash('Status inválido.', 'warning')
-                    return redirect(url_for('cartao'))
+                    return _redirect_cartao('lancamentos')
                 ok = cartao_service.atualizar_parcelada(
                     lancamento_id,
                     descricao,
@@ -454,7 +486,7 @@ def cartao():
                     )
             else:
                 flash('Não foi possível atualizar o lançamento.', 'warning')
-            return redirect(url_for('cartao'))
+            return _redirect_cartao('lancamentos')
     
     mes_fatura_exibicao, ano_fatura_exibicao = _normalizar_competencia(
         request.args.get('mes_fatura'),
@@ -532,6 +564,24 @@ def cartao():
     chaves_lancamentos = [grupo["chave"] for grupo in lancamentos_por_competencia]
     if (ano_lancamento_exibicao, mes_lancamento_exibicao) not in chaves_lancamentos and chaves_lancamentos:
         ano_lancamento_exibicao, mes_lancamento_exibicao = chaves_lancamentos[0]
+
+    grupo_lancamentos_ativo = None
+    idx_lancamentos_ativo = -1
+    for idx, grupo in enumerate(lancamentos_por_competencia):
+        if grupo["chave"] == (ano_lancamento_exibicao, mes_lancamento_exibicao):
+            grupo_lancamentos_ativo = grupo
+            idx_lancamentos_ativo = idx
+            break
+    competencia_lanc_anterior = (
+        lancamentos_por_competencia[idx_lancamentos_ativo - 1]
+        if idx_lancamentos_ativo > 0
+        else None
+    )
+    competencia_lanc_proxima = (
+        lancamentos_por_competencia[idx_lancamentos_ativo + 1]
+        if idx_lancamentos_ativo >= 0 and idx_lancamentos_ativo + 1 < len(lancamentos_por_competencia)
+        else None
+    )
     
     return render_template(
         'cartao.html',
@@ -544,6 +594,9 @@ def cartao():
         ano_comp_padrao=ano_comp_padrao,
         lancamentos_todos=lancamentos_todos,
         lancamentos_por_competencia=lancamentos_por_competencia,
+        grupo_lancamentos_ativo=grupo_lancamentos_ativo,
+        competencia_lanc_anterior=competencia_lanc_anterior,
+        competencia_lanc_proxima=competencia_lanc_proxima,
         mes_fatura_aberta=mes_fatura_aberta,
         ano_fatura_aberta=ano_fatura_aberta,
         mes_fatura_exibicao=mes_fatura_exibicao,

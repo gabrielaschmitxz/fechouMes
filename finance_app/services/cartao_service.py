@@ -559,14 +559,9 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
         status = str(item.get("status") or "")
         idx_primeiro = historico_primeira_competencia.get(int(item["id"]))
         if idx_primeiro is None:
-            mes_referencia = int(item.get("mes_inicio") or 1)
-            ano_referencia = int(item.get("ano_inicio") or date.today().year)
-            parcela_referencia = max(1, min(parcela_atual, total_parcelas))
-            mes_inicio, ano_inicio = _competencia_primeira_parcela(
-                mes_referencia,
-                ano_referencia,
-                parcela_referencia,
-            )
+            # mes_inicio/ano_inicio no cadastro = competência da 1ª parcela (igual à fatura).
+            mes_inicio = int(item.get("mes_inicio") or 1)
+            ano_inicio = int(item.get("ano_inicio") or date.today().year)
         else:
             mes_inicio, ano_inicio = (idx_primeiro % 12) + 1, idx_primeiro // 12
 
