@@ -86,21 +86,24 @@
                     {% endfor %}
                 </select>
                 {% if l.tipo == 'parcelado' %}
-                <small class="form-text text-muted">Esta linha em {{ l.periodo }} é a parcela {{ l.parcelas_label }}.</small>
+                <small class="form-text text-muted">
+                    Parcela desta competência ({{ l.periodo }}): <strong>{{ l.parcela_exibicao }}/{{ l.total_parcelas }}</strong>.
+                    {% set parcela_corrente = [l.parcela_atual|int, l.total_parcelas|int]|min %}
+                    {% if parcela_corrente != l.parcela_exibicao|int %}
+                    Andamento do plano: parcela {{ parcela_corrente }}/{{ l.total_parcelas }}.
+                    {% endif %}
+                </small>
                 {% endif %}
             </div>
         </div>
         {% if l.tipo == 'parcelado' %}
+        {% set parcela_corrente_salvar = [l.parcela_atual|int, l.total_parcelas|int]|min %}
+        {% set parcela_corrente_salvar = [parcela_corrente_salvar, 1]|max %}
+        <input type="hidden" name="parcela_atual" value="{{ parcela_corrente_salvar }}">
         <div class="col-6 col-md-2">
             <div class="form-group">
-                <label>Parcela atual</label>
-                <input type="number" name="parcela_atual" min="1" value="{{ l.parcela_atual }}" required>
-            </div>
-        </div>
-        <div class="col-6 col-md-2">
-            <div class="form-group">
-                <label>Total parcelas</label>
-                <input type="number" name="total_parcelas" min="1" value="{{ l.total_parcelas }}" required>
+                <label>Total de parcelas</label>
+                <input type="number" name="total_parcelas" min="1" max="120" value="{{ l.total_parcelas }}" required>
             </div>
         </div>
         {% endif %}

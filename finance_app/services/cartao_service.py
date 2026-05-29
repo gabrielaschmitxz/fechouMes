@@ -27,6 +27,21 @@ def _competencia_primeira_parcela(
     return (idx_primeira % 12) + 1, idx_primeira // 12
 
 
+def _normalizar_parcela_atual_no_banco(cur) -> None:
+    """Corrige parcela_atual > total_parcelas (ex.: após várias faturas pagas)."""
+    cur.execute(
+        """
+        UPDATE cartao_parceladas
+        SET parcela_atual = total_parcelas,
+            status = CASE
+                WHEN status = 'Ativa' THEN 'Finalizada'
+                ELSE status
+            END
+        WHERE parcela_atual > total_parcelas;
+        """
+    )
+
+
 def _extrair_parcela_descricao(texto: object | None) -> Tuple[int | None, int | None]:
     descricao = str(texto or "")
     match = re.search(r"parcela\s+(\d+)\s*/\s*(\d+)", descricao, flags=re.IGNORECASE)
@@ -248,6 +263,8 @@ def listar_parceladas_ativas() -> List[CartaoParcelada]:
 def listar_parceladas() -> List[CartaoParcelada]:
     conn = get_connection()
     cur = conn.cursor()
+    _normalizar_parcela_atual_no_banco(cur)
+    conn.commit()
     cur.execute(
         """
         SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual,
@@ -271,11 +288,10 @@ def criar_parcelada(
     parcela_atual: int = 1,
     categoria_id: int | None = None,
 ) -> None:
-    if categoria_id is None:
-        categoria_id = resolver_categoria_id_por_descricao(descricao)
-    valor_parcela = valor_total / total_parcelas if total_parcelas else valor_total
     conn = get_connection()
     cur = conn.cursor()
+    categoria_id = _resolver_categoria_lancamento(pessoa_id, categoria_id, descricao, conn=conn)
+    valor_parcela = valor_total / total_parcelas if total_parcelas else valor_total
     cur.execute(
         """
         INSERT INTO cartao_parceladas
@@ -296,14 +312,13 @@ def registrar_compra_avista(
     ano_referencia: int | None = None,
     categoria_id: int | None = None,
 ) -> None:
-    if categoria_id is None:
-        categoria_id = resolver_categoria_id_por_descricao(descricao)
     if mes_referencia is None or ano_referencia is None:
         mes_ref, ano_ref = mes_ano_fatura_atual()
     else:
         mes_ref, ano_ref = mes_referencia, ano_referencia
     conn = get_connection()
     cur = conn.cursor()
+    categoria_id = _resolver_categoria_lancamento(pessoa_id, categoria_id, descricao, conn=conn)
     cur.execute(
         """
         INSERT INTO cartao_avista (descricao, valor, mes_referencia, ano_referencia, pessoa_id, categoria_id)
@@ -460,11 +475,12 @@ def marcar_fatura_como_paga() -> None:
         """
     )
 
-    # Finaliza as que passaram do total
+    # Finaliza as que passaram do total e evita parcela_atual > total_parcelas no cadastro
     cur.execute(
         """
         UPDATE cartao_parceladas
-        SET status = 'Finalizada'
+        SET status = 'Finalizada',
+            parcela_atual = total_parcelas
         WHERE parcela_atual > total_parcelas AND status = 'Ativa';
         """
     )
@@ -485,6 +501,8 @@ def reabrir_fatura_atual() -> None:
 def listar_todos_lancamentos() -> List[Dict[str, object]]:
     conn = get_connection()
     cur = conn.cursor()
+    _normalizar_parcela_atual_no_banco(cur)
+    conn.commit()
     rows: List[Dict[str, object]] = []
     cur.execute(
         """
@@ -623,6 +641,7 @@ def atualizar_avista(
 ) -> bool:
     conn = get_connection()
     cur = conn.cursor()
+    categoria_id = _resolver_categoria_lancamento(pessoa_id, categoria_id, descricao, conn=conn)
     cur.execute(
         """
         UPDATE cartao_avista
@@ -649,8 +668,11 @@ def atualizar_parcelada(
     ano_inicio: int,
     categoria_id: int | None = None,
 ) -> bool:
+    total_parcelas = max(1, int(total_parcelas))
+    parcela_atual = max(1, min(int(parcela_atual), total_parcelas))
     conn = get_connection()
     cur = conn.cursor()
+    categoria_id = _resolver_categoria_lancamento(pessoa_id, categoria_id, descricao, conn=conn)
     cur.execute(
         """
         UPDATE cartao_parceladas
@@ -676,7 +698,77 @@ def atualizar_parcelada(
     return ok
 
 
+CATEGORIA_TERCEIROS_NOME = "Terceiros"
+
+
+def obter_ou_criar_categoria_terceiros(conn=None) -> int | None:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+    cur.execute(
+        """
+        SELECT id FROM cartao_categorias
+        WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?))
+        LIMIT 1;
+        """,
+        (CATEGORIA_TERCEIROS_NOME,),
+    )
+    row = cur.fetchone()
+    if row:
+        categoria_id = int(row["id"])
+        if close_conn:
+            conn_local.close()
+        return categoria_id
+    if close_conn:
+        conn_local.close()
+    return criar_categoria(CATEGORIA_TERCEIROS_NOME)
+
+
+def aplicar_categoria_terceiros_lancamentos_com_pessoa() -> Dict[str, object]:
+    """Define categoria Terceiros em todo lançamento com pessoa (diferente de Nosso)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    categoria_id = obter_ou_criar_categoria_terceiros(conn=conn)
+    if categoria_id is None:
+        conn.close()
+        return {"ok": False, "avista": 0, "parceladas": 0, "categoria_id": None}
+
+    cur.execute(
+        "UPDATE cartao_avista SET categoria_id = ? WHERE pessoa_id IS NOT NULL;",
+        (categoria_id,),
+    )
+    avista = int(cur.rowcount or 0)
+    cur.execute(
+        "UPDATE cartao_parceladas SET categoria_id = ? WHERE pessoa_id IS NOT NULL;",
+        (categoria_id,),
+    )
+    parceladas = int(cur.rowcount or 0)
+    conn.commit()
+    conn.close()
+    return {
+        "ok": True,
+        "categoria_id": categoria_id,
+        "avista": avista,
+        "parceladas": parceladas,
+        "total": avista + parceladas,
+    }
+
+
+def _resolver_categoria_lancamento(
+    pessoa_id: int | None,
+    categoria_id: int | None,
+    descricao: str,
+    conn=None,
+) -> int | None:
+    if pessoa_id is not None:
+        return obter_ou_criar_categoria_terceiros(conn=conn)
+    if categoria_id is not None:
+        return categoria_id
+    return resolver_categoria_id_por_descricao(descricao)
+
+
 CATEGORIAS_PADRAO_ORDEM: Tuple[str, ...] = (
+    CATEGORIA_TERCEIROS_NOME,
     "Internet e assinaturas",
     "Calçados",
     "Roupas",

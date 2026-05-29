@@ -448,9 +448,10 @@ def cartao():
                 parcela_atual = int(request.form.get('parcela_atual', 1))
                 status_raw = request.form.get('status')
                 status = status_raw.strip().capitalize() if status_raw else None
-                if total_parcelas < 1 or parcela_atual < 1 or parcela_atual > total_parcelas:
-                    flash('Parcela atual deve estar entre 1 e o total de parcelas.', 'warning')
+                if total_parcelas < 1:
+                    flash('O total de parcelas deve ser maior que zero.', 'warning')
                     return _redirect_cartao('lancamentos')
+                parcela_atual = max(1, min(parcela_atual, total_parcelas))
                 if status is not None and status not in {'Ativa', 'Finalizada'}:
                     flash('Status inválido.', 'warning')
                     return _redirect_cartao('lancamentos')
@@ -521,8 +522,11 @@ def cartao():
         ano_ref = int(l["ano_ref"])
         l["periodo"] = f'{mes_ref:02d}/{ano_ref} - {_MESES_NOMES[mes_ref]}'
         if l["tipo"] == "parcelado":
-            parcela_exibicao = int(l.get("parcela_exibicao", l["parcela_atual"]))
-            l["parcelas_label"] = f'{parcela_exibicao}/{int(l["total_parcelas"])}'
+            total_p = int(l["total_parcelas"])
+            parcela_exibicao = int(l.get("parcela_exibicao") or 1)
+            parcela_exibicao = max(1, min(parcela_exibicao, total_p))
+            l["parcela_exibicao"] = parcela_exibicao
+            l["parcelas_label"] = f"{parcela_exibicao}/{total_p}"
         else:
             l["parcelas_label"] = "-"
     for idx, l in enumerate(lancamentos_todos):
