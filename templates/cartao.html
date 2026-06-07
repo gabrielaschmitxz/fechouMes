@@ -19,6 +19,18 @@
 {{ url_for('cartao', aba='lancamentos', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lanc, ano_lancamento=ano_lanc, sort_by=sort_by or none, sort_dir=sort_dir if sort_by else none) }}
 {%- endmacro %}
 
+{% macro cartao_retorno_principal() %}
+<input type="hidden" name="ret_aba" value="principal">
+<input type="hidden" name="ret_mes_fatura" value="{{ mes_fatura_exibicao }}">
+<input type="hidden" name="ret_ano_fatura" value="{{ ano_fatura_exibicao }}">
+{% endmacro %}
+
+{% macro cartao_retorno_categorias() %}
+<input type="hidden" name="ret_aba" value="categorias">
+<input type="hidden" name="ret_mes_fatura" value="{{ mes_fatura_exibicao }}">
+<input type="hidden" name="ret_ano_fatura" value="{{ ano_fatura_exibicao }}">
+{% endmacro %}
+
 {% macro cartao_retorno_lancamentos() %}
 <input type="hidden" name="ret_aba" value="lancamentos">
 <input type="hidden" name="ret_mes_fatura" value="{{ mes_fatura_exibicao }}">
@@ -69,25 +81,25 @@
         </div>
         <div class="col-6 col-md-2">
             <div class="form-group">
-                <label>{% if l.tipo == 'parcelado' %}1ª parcela (mês){% else %}Competência (mês){% endif %}</label>
+                <label>Competência (mês)</label>
                 <select name="mes_competencia" required>
                     {% for m in range(1, 13) %}
-                        <option value="{{ m }}" {% if m == (l.mes_inicio if l.tipo == 'parcelado' else l.mes_ref) %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
+                        <option value="{{ m }}" {% if m == l.mes_ref %}selected{% endif %}>{{ "%02d"|format(m) }} - {{ meses[m] }}</option>
                     {% endfor %}
                 </select>
             </div>
         </div>
         <div class="col-6 col-md-2">
             <div class="form-group">
-                <label>{% if l.tipo == 'parcelado' %}Ano da 1ª parcela{% else %}Ano{% endif %}</label>
+                <label>Competência (ano)</label>
                 <select name="ano_competencia" required>
                     {% for a in anos_competencia %}
-                        <option value="{{ a }}" {% if a == (l.ano_inicio if l.tipo == 'parcelado' else l.ano_ref) %}selected{% endif %}>{{ a }}</option>
+                        <option value="{{ a }}" {% if a == l.ano_ref %}selected{% endif %}>{{ a }}</option>
                     {% endfor %}
                 </select>
                 {% if l.tipo == 'parcelado' %}
                 <small class="form-text text-muted">
-                    Parcela desta competência ({{ l.periodo }}): <strong>{{ l.parcela_exibicao }}/{{ l.total_parcelas }}</strong>.
+                    Parcela desta competência: <strong>{{ l.parcela_exibicao }}/{{ l.total_parcelas }}</strong>.
                     {% set parcela_corrente = [l.parcela_atual|int, l.total_parcelas|int]|min %}
                     {% if parcela_corrente != l.parcela_exibicao|int %}
                     Andamento do plano: parcela {{ parcela_corrente }}/{{ l.total_parcelas }}.
@@ -100,6 +112,7 @@
         {% set parcela_corrente_salvar = [l.parcela_atual|int, l.total_parcelas|int]|min %}
         {% set parcela_corrente_salvar = [parcela_corrente_salvar, 1]|max %}
         <input type="hidden" name="parcela_atual" value="{{ parcela_corrente_salvar }}">
+        <input type="hidden" name="parcela_exibicao" value="{{ l.parcela_exibicao }}">
         <div class="col-6 col-md-2">
             <div class="form-group">
                 <label>Total de parcelas</label>
@@ -133,6 +146,7 @@
 <section class="cartao-section cartao-section-config">
 <div class="section-title">Configuração do Cartão</div>
 <form method="POST">
+    {{ cartao_retorno_principal() }}
     <input type="hidden" name="action" value="config">
     <div class="row form-row">
         <div class="col-3">
@@ -239,10 +253,12 @@
 
 <div class="cartao-actions">
     <form method="POST">
+        {{ cartao_retorno_principal() }}
         <input type="hidden" name="action" value="marcar_paga">
         <button type="submit" class="btn btn-success btn-sm">Marcar Fatura como Paga</button>
     </form>
     <form method="POST">
+        {{ cartao_retorno_principal() }}
         <input type="hidden" name="action" value="reabrir">
         <button type="submit" class="btn btn-secondary btn-sm">Reabrir fatura (desfazer)</button>
     </form>
@@ -255,6 +271,7 @@
 <section class="cartao-section cartao-section-compra">
 <div class="section-title">Nova Compra no Cartão</div>
 <form method="POST">
+    {{ cartao_retorno_principal() }}
     <input type="hidden" name="action" value="compra">
     <div class="form-group">
         <label>Descrição</label>
@@ -345,6 +362,7 @@
     <section class="cartao-section cartao-section-categorias">
         <div class="section-title">Nova categoria</div>
         <form method="POST" class="compact-person-form" style="margin-bottom: 1rem;">
+            {{ cartao_retorno_categorias() }}
             <input type="hidden" name="action" value="nova_categoria">
             <div class="row form-row">
                 <div class="col-4">
@@ -376,6 +394,7 @@
                         <td>
                             <button class="btn btn-warning btn-sm" type="button" data-toggle="collapse" data-target="#editar-categoria-{{ cat.id }}" title="Editar">&#9998;</button>
                             <form method="POST" style="display:inline;">
+                                {{ cartao_retorno_categorias() }}
                                 <input type="hidden" name="action" value="excluir_categoria">
                                 <input type="hidden" name="categoria_id" value="{{ cat.id }}">
                                 <button type="submit" class="btn btn-danger btn-sm" title="Excluir" onclick="return confirm('Excluir esta categoria? Os lançamentos ficarão sem categoria.');">&#128465;</button>
@@ -385,6 +404,7 @@
                     <tr class="collapse" id="editar-categoria-{{ cat.id }}">
                         <td colspan="2">
                             <form method="POST" class="p-3 border rounded bg-light mb-2">
+                                {{ cartao_retorno_categorias() }}
                                 <input type="hidden" name="action" value="editar_categoria">
                                 <input type="hidden" name="categoria_id" value="{{ cat.id }}">
                                 <div class="form-group">
@@ -443,9 +463,14 @@
 
     <div class="lancamentos-comp-header">
         <h3 class="lancamentos-comp-titulo">{{ grupo_lancamentos_ativo.titulo }}</h3>
-        <a class="lancamentos-sort-link" href="{{ url_for('cartao', aba='lancamentos', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lancamento_exibicao, ano_lancamento=ano_lancamento_exibicao, sort_by='pessoa', sort_dir='desc' if sort_by == 'pessoa' and sort_dir == 'asc' else 'asc') }}">
-            Ordenar por pessoa {% if sort_by == 'pessoa' %}{% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
-        </a>
+        <div class="lancamentos-comp-header-acoes">
+            <a class="lancamentos-sort-link" href="{{ url_for('cartao', aba='lancamentos', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lancamento_exibicao, ano_lancamento=ano_lancamento_exibicao, sort_by='categoria', sort_dir='desc' if sort_by == 'categoria' and sort_dir == 'asc' else 'asc') }}">
+                Ordenar por categoria {% if sort_by == 'categoria' %}{% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
+            </a>
+            <a class="lancamentos-sort-link" href="{{ url_for('cartao', aba='lancamentos', mes_fatura=mes_fatura_exibicao, ano_fatura=ano_fatura_exibicao, mes_lancamento=mes_lancamento_exibicao, ano_lancamento=ano_lancamento_exibicao, sort_by='pessoa', sort_dir='desc' if sort_by == 'pessoa' and sort_dir == 'asc' else 'asc') }}">
+                Ordenar por pessoa {% if sort_by == 'pessoa' %}{% if sort_dir == 'asc' %}↑{% else %}↓{% endif %}{% endif %}
+            </a>
+        </div>
     </div>
 
     <div class="lancamentos-list">

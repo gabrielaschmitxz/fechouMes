@@ -24,6 +24,11 @@ body {
     --text-light: #666;
     --bg-light: #f8f9fa;
     --white: #ffffff;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --sidebar-width: 250px;
 }
 
 body {
@@ -42,15 +47,18 @@ body {
 
 /* Sidebar */
 .sidebar {
-    width: 250px;
+    width: var(--sidebar-width);
     background: linear-gradient(180deg, var(--primary-blue) 0%, var(--primary-blue-light) 100%);
     color: white;
-    padding: 1.5rem 0;
+    padding: calc(1.5rem + var(--safe-top)) 0 calc(1.5rem + var(--safe-bottom));
+    padding-left: var(--safe-left);
     position: fixed;
     top: 0;
     left: 0;
     height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .sidebar-header {
@@ -105,8 +113,8 @@ body {
 /* Main Content */
 .main-content {
     flex: 1;
-    margin-left: 250px;
-    padding: 2rem;
+    margin-left: var(--sidebar-width);
+    padding: calc(2rem + var(--safe-top)) calc(2rem + var(--safe-right)) calc(2rem + var(--safe-bottom)) calc(2rem + var(--safe-left));
     max-width: 100%;
     overflow-x: hidden;
 }
@@ -485,6 +493,13 @@ body {
     justify-content: space-between;
     gap: 0.5rem 1rem;
     margin-bottom: 0.85rem;
+}
+
+.lancamentos-comp-header-acoes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.65rem 1rem;
 }
 
 .lancamentos-comp-titulo {
@@ -1070,17 +1085,122 @@ body {
     white-space: nowrap;
 }
 
-/* Responsive */
-@media (max-width: 768px) {
+/* Responsive — iPad 11" paisagem e tablets similares (835px–1194px) */
+@media (min-width: 835px) and (max-width: 1194px) {
+    :root {
+        --sidebar-width: 220px;
+    }
+
+    .main-content {
+        padding: calc(1.35rem + var(--safe-top)) calc(1.35rem + var(--safe-right)) calc(1.35rem + var(--safe-bottom)) calc(1.35rem + var(--safe-left));
+    }
+
+    .main-content h1 {
+        font-size: 1.85rem;
+    }
+
+    .card-value {
+        font-size: 1.55rem;
+    }
+
+    .row > .col-4 {
+        flex: 0 0 50% !important;
+        width: 50% !important;
+        max-width: 50% !important;
+    }
+
+    .row > .col-3 {
+        flex: 0 0 50% !important;
+        width: 50% !important;
+        max-width: 50% !important;
+    }
+
+    .form-row > .col-3,
+    .form-row > .col-4 {
+        flex: 0 0 50% !important;
+        width: 50% !important;
+        max-width: 50% !important;
+    }
+
+    .form-row > .col-2 {
+        flex: 0 0 50% !important;
+        width: 50% !important;
+        max-width: 50% !important;
+    }
+
+    .form-row > .form-action-col {
+        flex: 0 0 auto !important;
+        width: auto !important;
+        max-width: none !important;
+    }
+
+    .receita-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .table {
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table table {
+        min-width: 640px;
+    }
+
+    .table th,
+    .table td {
+        padding: 0.85rem 0.65rem;
+        font-size: 0.94rem;
+    }
+
+    .nav.nav-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 0.35rem;
+    }
+
+    .nav.nav-tabs .nav-item {
+        flex: 0 0 auto;
+    }
+
+    .btn,
+    .sidebar-nav .nav-item,
+    .form-group input[type="text"],
+    .form-group input[type="password"],
+    .form-group input[type="number"],
+    .form-group input[type="date"],
+    .form-group select,
+    .form-group textarea {
+        min-height: 44px;
+    }
+
+    .contas-acao-btn {
+        width: 44px;
+        height: 44px;
+    }
+
+    .lancamento-card-acoes .btn {
+        min-height: 44px;
+    }
+
+    .dashboard-categorias-chart-wrap {
+        max-width: 360px;
+    }
+}
+
+/* Responsive — celular e iPad 11" retrato (≤834px) */
+@media (max-width: 834px) {
     .mobile-menu-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
         position: fixed;
-        top: 0.75rem;
-        left: 0.75rem;
-        width: 2.25rem;
-        height: 2.25rem;
+        top: calc(0.75rem + var(--safe-top));
+        left: calc(0.75rem + var(--safe-left));
+        width: 2.75rem;
+        height: 2.75rem;
         border: none;
         border-radius: 8px;
         background: #1e3a8a;
@@ -1088,11 +1208,15 @@ body {
         font-size: 1.2rem;
         z-index: 1200;
         box-shadow: 0 4px 12px rgba(30, 58, 138, 0.35);
+        -webkit-tap-highlight-color: transparent;
     }
 
     .sidebar {
-        width: 270px;
-        transform: translateX(-100%);
+        width: min(280px, calc(100vw - var(--safe-left) - var(--safe-right)));
+        padding-top: calc(1.25rem + var(--safe-top));
+        padding-bottom: calc(1.25rem + var(--safe-bottom));
+        padding-left: var(--safe-left);
+        transform: translateX(calc(-100% - var(--safe-left)));
         transition: transform 0.22s ease;
         z-index: 1100;
     }
@@ -1110,7 +1234,7 @@ body {
         margin-left: 0 !important;
         width: 100vw !important;
         max-width: 100vw !important;
-        padding: 3.6rem 0.9rem 0.9rem;
+        padding: calc(3.75rem + var(--safe-top)) calc(0.9rem + var(--safe-right)) calc(0.9rem + var(--safe-bottom)) calc(0.9rem + var(--safe-left));
         overflow-x: hidden !important;
     }
     .app-container {
@@ -1165,6 +1289,7 @@ body {
     }
     .btn {
         white-space: normal;
+        min-height: 44px;
     }
     .table {
         overflow-x: auto;
@@ -1190,6 +1315,12 @@ body {
     .form-group textarea {
         font-size: 16px;
     }
+    .sidebar-nav .nav-item {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+    }
+
     .metric-container,
     .btn,
     .sidebar-nav .nav-item {

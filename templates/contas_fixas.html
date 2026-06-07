@@ -5,6 +5,15 @@
 {% block content %}
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Contas Fixas</h1>
 
+{% macro contas_retorno() %}
+<input type="hidden" name="ret_mes" value="{{ mes }}">
+<input type="hidden" name="ret_ano" value="{{ ano }}">
+{% if sort_by %}
+<input type="hidden" name="ret_sort_by" value="{{ sort_by }}">
+<input type="hidden" name="ret_sort_dir" value="{{ sort_dir }}">
+{% endif %}
+{% endmacro %}
+
 <!-- Filtro -->
 <form method="GET" class="contas-filter">
     <div class="row form-row">
@@ -36,6 +45,7 @@
     <section class="contas-section contas-section-new">
         <div class="section-title">Nova conta fixa</div>
         <form method="POST">
+            {{ contas_retorno() }}
             <input type="hidden" name="action" value="nova_conta">
             <div class="row form-row">
                 <div class="col-3">
@@ -175,12 +185,14 @@
                         &#9998;
                     </button>
                     <form method="POST" class="contas-acao-form">
+                        {{ contas_retorno() }}
                         <input type="hidden" name="action" value="excluir_conta">
                         <input type="hidden" name="conta_id" value="{{ c.id }}">
                         <button type="submit" class="btn btn-danger btn-sm contas-acao-btn" title="Excluir">&#128465;</button>
                     </form>
                     {% if c.status == 'Pendente' %}
                     <form method="POST" class="contas-acao-form">
+                        {{ contas_retorno() }}
                         <input type="hidden" name="action" value="marcar_pago"> 
                         <input type="hidden" name="conta_id" value="{{ c.id }}">
                         <button type="submit" class="btn btn-success btn-sm contas-acao-btn" title="Marcar como pago">&#10003;</button>
@@ -191,6 +203,7 @@
             <tr class="collapse" id="editar-conta-{{ c.id }}">
                 <td colspan="9">
                     <form method="POST">
+                        {{ contas_retorno() }}
                         <input type="hidden" name="action" value="editar_conta">
                         <input type="hidden" name="conta_id" value="{{ c.id }}">
                         <div class="row form-row">

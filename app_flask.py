@@ -125,8 +125,36 @@ def _cartao_redirect_params(default_aba: str = "principal") -> dict:
     return params
 
 
-def _redirect_cartao(default_aba: str = "principal"):
-    return redirect(url_for("cartao", **_cartao_redirect_params(default_aba)))
+def _redirect_cartao(default_aba: str = "principal", overrides: dict | None = None):
+    params = _cartao_redirect_params(default_aba)
+    if overrides:
+        params.update(overrides)
+    return redirect(url_for("cartao", **params))
+
+
+def _redirect_pessoas():
+    mes_atual, ano_atual = _mes_ano_atual()
+    mes = request.form.get("ret_mes", type=int) or request.args.get("mes", type=int) or mes_atual
+    ano = request.form.get("ret_ano", type=int) or request.args.get("ano", type=int) or ano_atual
+    params = {"mes": mes, "ano": ano}
+    pessoa_id = request.form.get("ret_pessoa_id", type=int)
+    if pessoa_id:
+        params["pessoa_id"] = pessoa_id
+    return redirect(url_for("pessoas", **params))
+
+
+def _redirect_contas_fixas():
+    mes_atual, ano_atual = _mes_ano_atual()
+    mes = request.form.get("ret_mes", type=int) or request.args.get("mes", type=int) or mes_atual
+    ano = request.form.get("ret_ano", type=int) or request.args.get("ano", type=int) or ano_atual
+    params = {"mes": mes, "ano": ano}
+    sort_by = (request.form.get("ret_sort_by") or request.args.get("sort_by") or "").strip().lower()
+    sort_dir = (request.form.get("ret_sort_dir") or request.args.get("sort_dir") or "").strip().lower()
+    if sort_by:
+        params["sort_by"] = sort_by
+    if sort_dir in {"asc", "desc"}:
+        params["sort_dir"] = sort_dir
+    return redirect(url_for("contas_fixas", **params))
 
 
 def _parse_brl_value(raw_value, default=0.0):
@@ -275,6 +303,8 @@ def cartao():
     sort_dir = (request.args.get('sort_dir') or 'asc').strip().lower()
     if sort_dir not in {'asc', 'desc'}:
         sort_dir = 'asc'
+    if sort_by not in {'pessoa', 'categoria'}:
+        sort_by = ''
     
     if request.method == 'POST':
         action = request.form.get('action')
@@ -285,17 +315,17 @@ def cartao():
             dia_venc = int(request.form.get('dia_vencimento'))
             cartao_service.atualizar_config(limite, dia_fech, dia_venc)
             flash('Configuração atualizada.', 'success')
-            return redirect(url_for('cartao'))
+            return _redirect_cartao('principal')
         
         elif action == 'marcar_paga':
             cartao_service.marcar_fatura_como_paga()
             flash('Fatura marcada como paga e parcelas avançadas.', 'success')
-            return redirect(url_for('cartao'))
+            return _redirect_cartao('principal')
         
         elif action == 'reabrir':
             cartao_service.reabrir_fatura_atual()
             flash('Fatura marcada como pendente novamente.', 'info')
-            return redirect(url_for('cartao'))
+            return _redirect_cartao('principal')
         
         elif action == 'nova_categoria':
             nome = (request.form.get('nome') or '').strip()
@@ -305,7 +335,7 @@ def cartao():
                 flash('Categoria criada com sucesso.', 'success')
             else:
                 flash('Não foi possível criar. Verifique se o nome já existe.', 'warning')
-            return redirect(url_for('cartao', aba='categorias'))
+            return _redirect_cartao('categorias')
 
         elif action == 'editar_categoria':
             categoria_id = int(request.form.get('categoria_id', 0))
@@ -331,7 +361,7 @@ def cartao():
                         )
                 else:
                     flash('Não foi possível atualizar a categoria.', 'warning')
-            return redirect(url_for('cartao', aba='categorias'))
+            return _redirect_cartao('categorias')
 
         elif action == 'excluir_categoria':
             categoria_id = int(request.form.get('categoria_id', 0))
@@ -341,7 +371,7 @@ def cartao():
                 flash('Categoria excluída. Lançamentos ficaram sem categoria.', 'success')
             else:
                 flash('Não foi possível excluir a categoria.', 'warning')
-            return redirect(url_for('cartao', aba='categorias'))
+            return _redirect_cartao('categorias')
 
         elif action == 'compra':
             descricao = request.form.get('descricao')
@@ -362,17 +392,17 @@ def cartao():
             
             if not descricao or valor_compra <= 0:
                 flash('Informe descrição e valor maior que zero.', 'warning')
-                return redirect(url_for('cartao'))
+                return _redirect_cartao('principal')
             if categoria_id is not None and not cartao_service.categoria_existe(categoria_id):
                 flash('Categoria inválida.', 'warning')
-                return redirect(url_for('cartao'))
+                return _redirect_cartao('principal')
             if not avista:
                 if total_parcelas < 1:
                     flash('Número de parcelas deve ser maior que zero.', 'warning')
-                    return redirect(url_for('cartao'))
+                    return _redirect_cartao('principal')
                 if parcela_atual < 1 or parcela_atual > total_parcelas:
                     flash('Parcela atual deve estar entre 1 e o total de parcelas.', 'warning')
-                    return redirect(url_for('cartao'))
+                    return _redirect_cartao('principal')
             
             if avista:
                 cartao_service.registrar_compra_avista(
@@ -391,7 +421,7 @@ def cartao():
                     categoria_id,
                 )
             flash('Compra registrada com sucesso.', 'success')
-            return redirect(url_for('cartao'))
+            return _redirect_cartao('principal')
 
         elif action == 'excluir_lancamento':
             tipo = (request.form.get('tipo') or '').strip().lower()
@@ -446,15 +476,22 @@ def cartao():
             elif tipo == 'parcelado':
                 total_parcelas = int(request.form.get('total_parcelas', 1))
                 parcela_atual = int(request.form.get('parcela_atual', 1))
+                parcela_exibicao = int(request.form.get('parcela_exibicao', 1))
                 status_raw = request.form.get('status')
                 status = status_raw.strip().capitalize() if status_raw else None
                 if total_parcelas < 1:
                     flash('O total de parcelas deve ser maior que zero.', 'warning')
                     return _redirect_cartao('lancamentos')
                 parcela_atual = max(1, min(parcela_atual, total_parcelas))
+                parcela_exibicao = max(1, min(parcela_exibicao, total_parcelas))
                 if status is not None and status not in {'Ativa', 'Finalizada'}:
                     flash('Status inválido.', 'warning')
                     return _redirect_cartao('lancamentos')
+                mes_inicio, ano_inicio = cartao_service.competencia_primeira_parcela(
+                    mes_competencia,
+                    ano_competencia,
+                    parcela_exibicao,
+                )
                 ok = cartao_service.atualizar_parcelada(
                     lancamento_id,
                     descricao,
@@ -463,8 +500,8 @@ def cartao():
                     total_parcelas,
                     status,
                     pessoa_id,
-                    mes_competencia,
-                    ano_competencia,
+                    mes_inicio,
+                    ano_inicio,
                     categoria_id,
                 )
             else:
@@ -532,11 +569,8 @@ def cartao():
     for idx, l in enumerate(lancamentos_todos):
         l["ui_key"] = f"{l['tipo']}-{int(l['id'])}-{idx}"
     grupos_por_chave = {}
-    competencia_minima_lancamentos = (2026, 3)
     for l in lancamentos_todos:
         chave = (int(l["ano_ref"]), int(l["mes_ref"]))
-        if chave < competencia_minima_lancamentos:
-            continue
         grupo = grupos_por_chave.get(chave)
         if grupo is None:
             ano_ref, mes_ref = chave
@@ -554,6 +588,18 @@ def cartao():
                 grupo["lancamentos"],
                 key=lambda l: (
                     (l.get("pessoa_nome") or "").strip().lower(),
+                    (l.get("descricao") or "").strip().lower(),
+                    str(l.get("tipo") or ""),
+                    int(l.get("id") or 0),
+                ),
+                reverse=(sort_dir == 'desc'),
+            )
+    elif sort_by == 'categoria':
+        for grupo in grupos_por_chave.values():
+            grupo["lancamentos"] = sorted(
+                grupo["lancamentos"],
+                key=lambda l: (
+                    (l.get("categoria_nome") or "Sem categoria").strip().lower(),
                     (l.get("descricao") or "").strip().lower(),
                     str(l.get("tipo") or ""),
                     int(l.get("id") or 0),
@@ -709,7 +755,7 @@ def contas_fixas():
                 flash('Conta excluída com sucesso.', 'success')
             else:
                 flash('Não foi possível excluir a conta.', 'warning')
-            return redirect(url_for('contas_fixas', mes=mes, ano=ano))
+            return _redirect_contas_fixas()
         
         elif action == 'marcar_pago':
             conta_id = int(request.form.get('conta_id', 0))
@@ -718,7 +764,7 @@ def contas_fixas():
                 flash('Conta marcada como paga com sucesso.', 'success')
             else:
                 flash('Conta não encontrada ou já estava marcada como paga.', 'info')
-            return redirect(url_for('contas_fixas', mes=mes, ano=ano))
+            return _redirect_contas_fixas()
     
     conn = get_connection()
     try:
@@ -784,7 +830,7 @@ def pessoas():
             if nome:
                 pessoas_service.criar_pessoa(nome)
                 flash('Pessoa criada com sucesso.', 'success')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
         
         elif action == 'excluir_pessoa':
             pessoa_id = int(request.form.get('pessoa_id'))
@@ -797,7 +843,7 @@ def pessoas():
                     flash('Pessoa excluída com sucesso.', 'success')
                 except Exception:
                     flash('Não foi possível excluir. A pessoa pode ter registros vinculados.', 'warning')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         
         elif action == 'editar_pessoa':
@@ -816,7 +862,7 @@ def pessoas():
                     flash('Pessoa atualizada com sucesso.', 'success')
                 except Exception:
                     flash('Nao foi possivel atualizar. Verifique se o nome ja existe.', 'warning')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         elif action == 'toggle_padrao':
             pessoa_id = int(request.form.get('pessoa_id'))
@@ -826,7 +872,7 @@ def pessoas():
             else:
                 pessoas_service.atualizar_padrao_pessoa(pessoa_id, not pessoa.padrao)
                 flash('Padrão atualizado.', 'success')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         elif action == 'registrar_pagamento_itens':
             pessoa_id = int(request.form.get('pessoa_id'))
@@ -841,7 +887,7 @@ def pessoas():
                 flash(f'Pagamento registrado: R$ {total:,.2f}.', 'success')
             else:
                 flash('Selecione ao menos uma conta pendente.', 'warning')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         elif action == 'registrar_pagamento_item':
             pessoa_id = int(request.form.get('pessoa_id', 0))
@@ -850,7 +896,7 @@ def pessoas():
             ano_ref = request.form.get('ano_ref', type=int, default=ano)
             if pessoa_id <= 0 or not conta_token:
                 flash('Dados inválidos para pagamento.', 'warning')
-                return redirect(url_for('pessoas', mes=mes, ano=ano))
+                return _redirect_pessoas()
             total = pessoas_service.registrar_pagamento_terceiro_por_itens(
                 pessoa_id, [conta_token], mes_ref, ano_ref, mes_cartao_alt, ano_cartao_alt
             )
@@ -858,7 +904,7 @@ def pessoas():
                 flash(f'Pagamento registrado: R$ {total:,.2f}.', 'success')
             else:
                 flash('Esta conta já está paga ou não foi encontrada.', 'warning')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         elif action == 'registrar_pagamento_todos':
             pessoa_id = int(request.form.get('pessoa_id', 0))
@@ -866,7 +912,7 @@ def pessoas():
             ano_ref = request.form.get('ano_ref', type=int, default=ano)
             if pessoa_id <= 0:
                 flash('Pessoa inválida para pagamento.', 'warning')
-                return redirect(url_for('pessoas', mes=mes, ano=ano))
+                return _redirect_pessoas()
             contas = pessoas_service.listar_contas_status_pessoa(
                 pessoa_id, mes_ref, ano_ref, mes_cartao_alt, ano_cartao_alt
             )
@@ -878,7 +924,7 @@ def pessoas():
                 flash(f'Todas as contas pendentes foram marcadas como pagas: R$ {total:,.2f}.', 'success')
             else:
                 flash('Não há contas pendentes para essa pessoa.', 'info')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         elif action == 'adicionar_desconto':
             pessoa_id = int(request.form.get('pessoa_id', 0))
@@ -887,7 +933,7 @@ def pessoas():
             pessoa = pessoas_service.get_pessoa_by_id(pessoa_id)
             if not pessoa:
                 flash('Pessoa não encontrada.', 'warning')
-                return redirect(url_for('pessoas', mes=mes, ano=ano))
+                return _redirect_pessoas()
 
             descricao_desconto = (request.form.get('descricao_desconto') or '').strip()
             valor_desconto = _parse_brl_value(request.form.get('valor_desconto'), 0.0)
@@ -900,7 +946,7 @@ def pessoas():
                     pessoa_id, descricao_desconto, float(valor_desconto), mes_ref, ano_ref
                 )
                 flash('Desconto adicionado com sucesso.', 'success')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         elif action == 'excluir_desconto':
             pessoa_id = int(request.form.get('pessoa_id', 0))
@@ -909,7 +955,7 @@ def pessoas():
                 flash('Desconto removido com sucesso.', 'success')
             else:
                 flash('Não foi possível remover o desconto.', 'warning')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
 
         elif action == 'editar_desconto':
             pessoa_id = int(request.form.get('pessoa_id', 0))
@@ -928,7 +974,7 @@ def pessoas():
                     flash('Desconto atualizado com sucesso.', 'success')
                 else:
                     flash('Desconto não encontrado.', 'warning')
-            return redirect(url_for('pessoas', mes=mes, ano=ano))
+            return _redirect_pessoas()
     
     prioridades_nome = {"aila": 1, "raynne": 2}
 

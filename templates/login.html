@@ -2,16 +2,17 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Login - Fechou Mês</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         .login-page {
             min-height: 100vh;
+            min-height: 100dvh;
             display: grid;
             place-items: center;
             background: linear-gradient(160deg, #e0ecff 0%, #f8fbff 45%, #eef6ff 100%);
-            padding: 1.2rem;
+            padding: calc(1.2rem + env(safe-area-inset-top, 0px)) calc(1.2rem + env(safe-area-inset-right, 0px)) calc(1.2rem + env(safe-area-inset-bottom, 0px)) calc(1.2rem + env(safe-area-inset-left, 0px));
         }
         .login-card {
             width: 100%;

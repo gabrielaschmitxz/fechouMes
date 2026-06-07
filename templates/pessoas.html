@@ -5,6 +5,15 @@
 {% block content %}
 <h1 style="color: #2d3748; margin-bottom: 1.5rem;">Pessoas / Terceiros</h1>
 
+{% macro pessoas_retorno(pessoa_id=none) %}
+<input type="hidden" name="ret_mes" value="{{ mes }}">
+<input type="hidden" name="ret_ano" value="{{ ano }}">
+{% set pid = pessoa_id if pessoa_id is not none else pessoa_ativa_id %}
+{% if pid %}
+<input type="hidden" name="ret_pessoa_id" value="{{ pid }}">
+{% endif %}
+{% endmacro %}
+
 <!-- Abas Pessoas -->
 <ul class="nav nav-tabs pessoas-tabs" role="tablist">
     <li class="nav-item">
@@ -25,6 +34,7 @@
         <section class="pessoa-section pessoa-section-new">
         <div class="section-title">Nova pessoa</div>
         <form method="POST" class="compact-person-form">
+            {{ pessoas_retorno() }}
             <input type="hidden" name="action" value="nova_pessoa">
             <div class="row form-row">
                 <div class="col-2">
@@ -103,6 +113,7 @@
                         </td>
                         <td>
                             <form method="POST" style="display: inline;">
+                                {{ pessoas_retorno() }}
                                 <input type="hidden" name="action" value="toggle_padrao">
                                 <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                                 <button type="submit" class="btn btn-outline-primary btn-sm" title="Alternar padrão">
@@ -116,6 +127,7 @@
                             </button>
                             <span style="display: inline-block; width: 0.35rem;"></span>
                             <form method="POST" style="display: inline;">
+                                {{ pessoas_retorno() }}
                                 <input type="hidden" name="action" value="excluir_pessoa">
                                 <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                                 <button type="submit" class="btn btn-danger btn-sm" title="Excluir">&#128465;</button>
@@ -125,6 +137,7 @@
                     <tr class="collapse" id="editForm{{ r.pessoa.id }}">
                         <td colspan="7">
                             <form method="POST" class="p-3 border rounded bg-light mb-2">
+                                {{ pessoas_retorno() }}
                                 <input type="hidden" name="action" value="editar_pessoa">
                                 <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                                 <div class="form-group">
@@ -209,6 +222,7 @@
                                         <td>
                                             {% if not conta.pago %}
                                             <form method="POST" style="display:inline;">
+                                                {{ pessoas_retorno(r.pessoa.id) }}
                                                 <input type="hidden" name="action" value="registrar_pagamento_item">
                                                 <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                                                 <input type="hidden" name="conta_token" value="{{ conta.token }}">
@@ -225,6 +239,7 @@
                         </div>
                         {% if ns_mes.pendentes > 0 %}
                         <form method="POST" style="margin: 0.55rem 0 0.85rem;">
+                            {{ pessoas_retorno(r.pessoa.id) }}
                             <input type="hidden" name="action" value="registrar_pagamento_todos">
                             <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                             <input type="hidden" name="mes_ref" value="{{ m.mes }}">
@@ -235,6 +250,7 @@
                         {% endif %}
                         <h6 style="margin: 0 0 0.5rem 0;">Descontos</h6>
                         <form method="POST" style="margin: 0.25rem 0 0.75rem;">
+                            {{ pessoas_retorno(r.pessoa.id) }}
                             <input type="hidden" name="action" value="adicionar_desconto">
                             <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                             <input type="hidden" name="mes_ref" value="{{ m.mes }}">
@@ -284,6 +300,7 @@
                                                 &#9998;
                                             </button>
                                             <form method="POST" style="display:inline;">
+                                                {{ pessoas_retorno(r.pessoa.id) }}
                                                 <input type="hidden" name="action" value="excluir_desconto">
                                                 <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                                                 <input type="hidden" name="desconto_id" value="{{ d.id }}">
@@ -294,6 +311,7 @@
                                     <tr class="collapse" id="editar-desconto-{{ d.id }}">
                                         <td colspan="3">
                                             <form method="POST">
+                                                {{ pessoas_retorno(r.pessoa.id) }}
                                                 <input type="hidden" name="action" value="editar_desconto">
                                                 <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
                                                 <input type="hidden" name="desconto_id" value="{{ d.id }}">

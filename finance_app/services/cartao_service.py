@@ -21,10 +21,20 @@ def _indice_competencia(mes: int, ano: int) -> int:
 def _competencia_primeira_parcela(
     mes_referencia: int,
     ano_referencia: int,
-    parcela_atual: int,
+    parcela_exibicao: int,
 ) -> Tuple[int, int]:
-    idx_primeira = _indice_competencia(mes_referencia, ano_referencia) - (int(parcela_atual) - 1)
+    idx_primeira = _indice_competencia(mes_referencia, ano_referencia) - (int(parcela_exibicao) - 1)
     return (idx_primeira % 12) + 1, idx_primeira // 12
+
+
+def competencia_primeira_parcela(
+    mes_referencia: int,
+    ano_referencia: int,
+    parcela_exibicao: int,
+) -> Tuple[int, int]:
+    """Dado mês/ano de uma parcela N, retorna mês/ano da 1ª parcela."""
+    parcela = max(1, int(parcela_exibicao))
+    return _competencia_primeira_parcela(mes_referencia, ano_referencia, parcela)
 
 
 def _normalizar_parcela_atual_no_banco(cur) -> None:

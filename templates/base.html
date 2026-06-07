@@ -2,7 +2,8 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>{% block title %}Fechou Mês - Controle Financeiro{% endblock %}</title>
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
@@ -69,6 +70,13 @@
                         container.classList.remove("sidebar-open");
                     });
                 });
+
+                container.addEventListener("click", function (event) {
+                    if (!container.classList.contains("sidebar-open")) return;
+                    if (sidebar.contains(event.target) || btn.contains(event.target)) return;
+                    sidebar.classList.remove("open");
+                    container.classList.remove("sidebar-open");
+                });
             }
 
             function formatMoneyFromDigits(digits) {
@@ -120,7 +128,82 @@
                 }
             }
 
+            function captureViewState(form) {
+                var tabs = Array.from(document.querySelectorAll(".main-content .nav-tabs .nav-link.active"))
+                    .map(function (link) { return link.getAttribute("href") || ""; })
+                    .filter(function (href) { return href; });
+                var anchorEl = form.closest("[id]");
+                if (!anchorEl || !anchorEl.id) {
+                    var marked = form.closest(".lancamento-card, tr[id], section[id], article[id]");
+                    if (marked && marked.id) {
+                        anchorEl = marked;
+                    }
+                }
+                var collapse = form.closest(".collapse");
+                var state = {
+                    path: window.location.pathname,
+                    scrollY: window.scrollY,
+                    tabs: tabs,
+                    anchorId: anchorEl && anchorEl.id ? anchorEl.id : "",
+                    collapseId: collapse && collapse.id ? collapse.id : "",
+                };
+                sessionStorage.setItem("fechoumes_view_state", JSON.stringify(state));
+            }
+
+            function restoreViewState() {
+                var raw = sessionStorage.getItem("fechoumes_view_state");
+                if (!raw) {
+                    return;
+                }
+                sessionStorage.removeItem("fechoumes_view_state");
+
+                var state;
+                try {
+                    state = JSON.parse(raw);
+                } catch (err) {
+                    return;
+                }
+                if (!state || state.path !== window.location.pathname) {
+                    return;
+                }
+
+                (state.tabs || []).forEach(function (tabHref) {
+                    if (!tabHref || tabHref.charAt(0) !== "#" || !window.jQuery) {
+                        return;
+                    }
+                    var tabEl = document.querySelector('.main-content .nav-tabs .nav-link[href="' + tabHref + '"]');
+                    if (tabEl) {
+                        window.jQuery(tabEl).tab("show");
+                    }
+                });
+
+                function applyScroll() {
+                    if (state.collapseId && window.jQuery) {
+                        var collapseEl = document.getElementById(state.collapseId);
+                        if (collapseEl) {
+                            window.jQuery(collapseEl).collapse("show");
+                        }
+                    }
+                    if (state.anchorId) {
+                        var target = document.getElementById(state.anchorId);
+                        if (target) {
+                            target.scrollIntoView({ block: "center" });
+                            return;
+                        }
+                    }
+                    window.scrollTo(0, Number(state.scrollY) || 0);
+                }
+
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(applyScroll);
+                    window.setTimeout(applyScroll, 150);
+                });
+            }
+
             document.addEventListener("DOMContentLoaded", function () {
+                if ("scrollRestoration" in history) {
+                    history.scrollRestoration = "manual";
+                }
                 initMobileSidebar();
                 document.querySelectorAll("input.money-input").forEach(initMoneyInput);
 
@@ -135,11 +218,21 @@
                                 return;
                             }
                         }
+                        const method = (form.getAttribute("method") || "get").toLowerCase();
+                        if (method === "post") {
+                            queueMicrotask(function () {
+                                if (!event.defaultPrevented) {
+                                    captureViewState(form);
+                                }
+                            });
+                        }
                         form.querySelectorAll("input.money-input").forEach(function (input) {
                             input.value = parseMoneyToDot(input.value);
                         });
                     });
                 });
+
+                restoreViewState();
             });
         })();
     </script>
