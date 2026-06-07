@@ -194,7 +194,7 @@ def _to_float(value, default=0.0):
 def _require_login():
     g.request_started_at = time.perf_counter()
     if request.path == "/favicon.ico":
-        return "", 204
+        return redirect(url_for("static", filename="icons/favicon-32.png"))
     public_endpoints = {"login", "static"}
     if request.endpoint is None or request.endpoint in public_endpoints:
         return
