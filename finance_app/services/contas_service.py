@@ -644,6 +644,37 @@ def marcar_conta_como_paga(conta_id: int) -> bool:
     conn.commit()
     conn.close()
     return ok
+
+
+def desfazer_conta_como_paga(conta_id: int) -> bool:
+    from finance_app.services import pessoas_service
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT status FROM contas_fixas WHERE id = ?;", (conta_id,))
+    row = cur.fetchone()
+    if not row or str(row["status"]) != "Pago":
+        conn.close()
+        return False
+
+    pessoas_service.desfazer_pagamento_conta_fixa_sincronizado(conta_id, conn=conn)
+    cur.execute(
+        """
+        UPDATE contas_fixas
+        SET status = 'Pendente',
+            desconto_aplicado = FALSE,
+            desconto_origem = NULL,
+            desconto_receita_extra_id = NULL
+        WHERE id = ?;
+        """,
+        (conta_id,),
+    )
+    ok = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return ok
+
+
 def calcular_totais_contas_fixas(
     mes: int,
     ano: int,

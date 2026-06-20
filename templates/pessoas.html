@@ -228,7 +228,19 @@
                                                 <input type="hidden" name="conta_token" value="{{ conta.token }}">
                                                 <input type="hidden" name="mes_ref" value="{{ m.mes }}">
                                                 <input type="hidden" name="ano_ref" value="{{ m.ano }}">
-                                                <button type="submit" class="btn btn-success btn-sm" title="Pagar">&#10003;</button>
+                                                <button type="submit" class="btn btn-success btn-sm" title="Marcar como pago">&#10003;</button>
+                                            </form>
+                                            {% else %}
+                                            <form method="POST" style="display:inline;">
+                                                {{ pessoas_retorno(r.pessoa.id) }}
+                                                <input type="hidden" name="action" value="desfazer_pagamento_item">
+                                                <input type="hidden" name="pessoa_id" value="{{ r.pessoa.id }}">
+                                                <input type="hidden" name="conta_token" value="{{ conta.token }}">
+                                                <input type="hidden" name="mes_ref" value="{{ m.mes }}">
+                                                <input type="hidden" name="ano_ref" value="{{ m.ano }}">
+                                                <input type="hidden" name="mes_item" value="{{ conta.mes_referencia }}">
+                                                <input type="hidden" name="ano_item" value="{{ conta.ano_referencia }}">
+                                                <button type="submit" class="btn btn-warning btn-sm" title="Desfazer pagamento">&#8634;</button>
                                             </form>
                                             {% endif %}
                                         </td>

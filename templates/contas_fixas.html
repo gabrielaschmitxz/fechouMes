@@ -197,6 +197,13 @@
                         <input type="hidden" name="conta_id" value="{{ c.id }}">
                         <button type="submit" class="btn btn-success btn-sm contas-acao-btn" title="Marcar como pago">&#10003;</button>
                     </form>
+                    {% else %}
+                    <form method="POST" class="contas-acao-form">
+                        {{ contas_retorno() }}
+                        <input type="hidden" name="action" value="desfazer_pago">
+                        <input type="hidden" name="conta_id" value="{{ c.id }}">
+                        <button type="submit" class="btn btn-warning btn-sm contas-acao-btn" title="Desfazer pagamento">&#8634;</button>
+                    </form>
                     {% endif %}
                 </td>
             </tr>

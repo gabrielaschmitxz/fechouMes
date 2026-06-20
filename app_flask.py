@@ -810,6 +810,14 @@ def contas_fixas():
                 flash('Não foi possível excluir a conta.', 'warning')
             return _redirect_contas_fixas()
         
+        elif action == 'desfazer_pago':
+            conta_id = int(request.form.get('conta_id', 0))
+            if conta_id > 0 and contas_service.desfazer_conta_como_paga(conta_id):
+                flash('Pagamento desfeito. Conta voltou para pendente.', 'success')
+            else:
+                flash('Não foi possível desfazer. A conta não está marcada como paga.', 'warning')
+            return _redirect_contas_fixas()
+
         elif action == 'marcar_pago':
             conta_id = int(request.form.get('conta_id', 0))
             foi_atualizada = contas_service.marcar_conta_como_paga(conta_id)
@@ -977,6 +985,24 @@ def pessoas():
                 flash(f'Todas as contas pendentes foram marcadas como pagas: R$ {total:,.2f}.', 'success')
             else:
                 flash('Não há contas pendentes para essa pessoa.', 'info')
+            return _redirect_pessoas()
+
+        elif action == 'desfazer_pagamento_item':
+            pessoa_id = int(request.form.get('pessoa_id', 0))
+            conta_token = (request.form.get('conta_token') or '').strip()
+            mes_ref = request.form.get('mes_ref', type=int, default=mes)
+            ano_ref = request.form.get('ano_ref', type=int, default=ano)
+            mes_item = request.form.get('mes_item', type=int, default=mes_ref)
+            ano_item = request.form.get('ano_item', type=int, default=ano_ref)
+            if pessoa_id <= 0 or not conta_token:
+                flash('Dados inválidos para desfazer pagamento.', 'warning')
+                return _redirect_pessoas()
+            if pessoas_service.desfazer_pagamento_terceiro_item(
+                pessoa_id, conta_token, mes_item, ano_item
+            ):
+                flash('Pagamento desfeito com sucesso.', 'success')
+            else:
+                flash('Não foi possível desfazer. Pagamento não encontrado.', 'warning')
             return _redirect_pessoas()
 
         elif action == 'adicionar_desconto':

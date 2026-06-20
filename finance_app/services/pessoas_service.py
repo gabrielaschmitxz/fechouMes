@@ -7,7 +7,6 @@ from datetime import date, datetime
 
 from finance_app.database import USE_POSTGRES, get_connection
 from finance_app.services import gastos_service
-from finance_app.services import cartao_service
 from finance_app.models import Pessoa
 
 
@@ -539,6 +538,38 @@ def _parcela_num_cartao_parcelada(
     return None
 
 
+def _carregar_parcelas_pagas_por_item(cur, pessoa_id: int) -> Dict[int, set[int]]:
+    """Parcelas quitadas por item_id (número da parcela extraído do pagamento)."""
+    cur.execute(
+        """
+        SELECT item_id, descricao_item
+        FROM pagamentos_terceiros_itens
+        WHERE pessoa_id = ? AND tipo = 'cartao_parcelada';
+        """,
+        (pessoa_id,),
+    )
+    mapa: Dict[int, set[int]] = {}
+    for row in cur.fetchall():
+        parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
+        if parcela_num is None:
+            continue
+        mapa.setdefault(int(row["item_id"]), set()).add(int(parcela_num))
+    return mapa
+
+
+def _cartao_parcelada_esta_paga(
+    parcelas_pagas: Dict[int, set[int]],
+    pagos_keys: set,
+    item_id: int,
+    parcela_num: int,
+    mes_ref: int,
+    ano_ref: int,
+) -> bool:
+    if int(parcela_num) in parcelas_pagas.get(int(item_id), set()):
+        return True
+    return ("cartao_parcelada", int(item_id), int(mes_ref), int(ano_ref)) in pagos_keys
+
+
 def _competencia_primeira_parcela(
     mes_referencia: int,
     ano_referencia: int,
@@ -769,6 +800,159 @@ def sincronizar_pagamento_pessoa_conta_fixa(conta_id: int, conn=None) -> bool:
     return True
 
 
+def _remover_pagamento_terceiro_registrado(
+    cur,
+    pessoa_id: int,
+    tipo: str,
+    item_id: int,
+    mes_referencia: int,
+    ano_referencia: int,
+) -> bool:
+    cur.execute(
+        """
+        SELECT id, pagamento_id
+        FROM pagamentos_terceiros_itens
+        WHERE pessoa_id = ?
+          AND tipo = ?
+          AND item_id = ?
+          AND mes_referencia = ?
+          AND ano_referencia = ?;
+        """,
+        (pessoa_id, tipo, item_id, mes_referencia, ano_referencia),
+    )
+    row = cur.fetchone()
+    if not row:
+        return False
+
+    item_pagamento_id = int(row["id"])
+    pagamento_id = int(row["pagamento_id"])
+    cur.execute(
+        "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
+        (item_pagamento_id,),
+    )
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(valor), 0) AS total, COUNT(*) AS qtd
+        FROM pagamentos_terceiros_itens
+        WHERE pagamento_id = ?;
+        """,
+        (pagamento_id,),
+    )
+    resumo = cur.fetchone()
+    if int(resumo["qtd"] or 0) == 0:
+        cur.execute("DELETE FROM pagamentos_terceiros WHERE id = ?;", (pagamento_id,))
+    else:
+        cur.execute(
+            "UPDATE pagamentos_terceiros SET valor = ? WHERE id = ?;",
+            (float(resumo["total"]), pagamento_id),
+        )
+    return True
+
+
+def desfazer_pagamento_terceiro_item(
+    pessoa_id: int,
+    conta_token: str,
+    mes_referencia: int,
+    ano_referencia: int,
+) -> bool:
+    partes = str(conta_token or "").strip().split(":", 1)
+    if len(partes) != 2:
+        return False
+    tipo = partes[0].strip()
+    try:
+        item_id = int(partes[1])
+    except ValueError:
+        return False
+    if pessoa_id <= 0 or item_id <= 0 or not tipo:
+        return False
+
+    conn = get_connection()
+    cur = conn.cursor()
+    ok = _remover_pagamento_terceiro_registrado(
+        cur,
+        pessoa_id,
+        tipo,
+        item_id,
+        mes_referencia,
+        ano_referencia,
+    )
+    if ok and tipo == "conta_fixa":
+        cur.execute(
+            """
+            UPDATE contas_fixas
+            SET status = 'Pendente',
+                desconto_aplicado = FALSE,
+                desconto_origem = NULL,
+                desconto_receita_extra_id = NULL
+            WHERE id = ?;
+            """,
+            (item_id,),
+        )
+    if ok:
+        conn.commit()
+    conn.close()
+    return ok
+
+
+def desfazer_pagamento_conta_fixa_sincronizado(conta_id: int, conn=None) -> bool:
+    """Remove registro em pagamentos de terceiros espelhado ao marcar conta fixa como paga."""
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+
+    cur.execute(
+        """
+        SELECT desconto_pessoa_nome, mes_referencia, ano_referencia, vencimento_data
+        FROM contas_fixas
+        WHERE id = ?;
+        """,
+        (int(conta_id),),
+    )
+    row = cur.fetchone()
+    if not row:
+        if close_conn:
+            conn_local.close()
+        return False
+
+    nome_pessoa = (row["desconto_pessoa_nome"] or "").strip()
+    if not nome_pessoa:
+        if close_conn:
+            conn_local.close()
+        return True
+
+    cur.execute(
+        """
+        SELECT id FROM pessoas
+        WHERE LOWER(TRIM(nome)) = LOWER(TRIM(?))
+        LIMIT 1;
+        """,
+        (nome_pessoa,),
+    )
+    pessoa_row = cur.fetchone()
+    if not pessoa_row:
+        if close_conn:
+            conn_local.close()
+        return True
+
+    mes_cf, ano_cf = _competencia_conta_fixa(
+        int(row["mes_referencia"]),
+        int(row["ano_referencia"]),
+        row["vencimento_data"],
+    )
+    ok = _remover_pagamento_terceiro_registrado(
+        cur,
+        int(pessoa_row["id"]),
+        "conta_fixa",
+        int(conta_id),
+        mes_cf,
+        ano_cf,
+    )
+    if close_conn:
+        conn_local.commit()
+        conn_local.close()
+    return ok
+
+
 def _descricao_pagamento_parcelada(texto: object | None) -> str:
     descricao = str(texto or "").strip()
     return descricao or "Cartão parcelado"
@@ -974,6 +1158,7 @@ def listar_contas_status_pessoa(
     ano_referencia: int,
     mes_cartao_referencia: int | None = None,
     ano_cartao_referencia: int | None = None,
+    conn=None,
 ) -> List[Dict[str, float | int | str | bool]]:
     chave = f"{int(ano_referencia)}-{int(mes_referencia):02d}"
     mapa = listar_contas_status_pessoa_meses(
@@ -981,6 +1166,7 @@ def listar_contas_status_pessoa(
         [(int(mes_referencia), int(ano_referencia))],
         mes_cartao_referencia,
         ano_cartao_referencia,
+        conn=conn,
     )
     return mapa.get(chave, [])
 
@@ -1053,6 +1239,7 @@ def listar_contas_status_pessoa_meses(
 
     parceladas_adicionadas: set[Tuple[int, int, int]] = set()
     parceladas_por_id = {int(r["id"]): r for r in parceladas_ativas}
+    parcelas_pagas_por_item = _carregar_parcelas_pagas_por_item(cur, pessoa_id)
     for r in parceladas_ativas:
         item_id = int(r["id"])
         total_parcelas = int(r["total_parcelas"])
@@ -1066,7 +1253,14 @@ def listar_contas_status_pessoa_meses(
             m_ref = (idx_ref % 12) + 1
             a_ref = idx_ref // 12
             parcela_num = idx_ref - int(idx_primeiro) + 1
-            pago = ("cartao_parcelada", item_id, m_ref, a_ref) in pagos_keys
+            pago = _cartao_parcelada_esta_paga(
+                parcelas_pagas_por_item,
+                pagos_keys,
+                item_id,
+                parcela_num,
+                m_ref,
+                a_ref,
+            )
             parceladas_adicionadas.add((item_id, m_ref, a_ref))
             mapa[f"{a_ref}-{m_ref:02d}"].append(
                 {
@@ -1560,332 +1754,35 @@ def calcular_totais_por_pessoa(
     close_conn = conn is None
     conn_local = conn or get_connection()
     cur = conn_local.cursor()
+    cur.execute("SELECT id FROM pessoas;")
+    pessoa_ids = [int(row["id"]) for row in cur.fetchall()]
+    descontos_manuais = obter_descontos_manuais_por_pessoa(mes, ano, conn=conn_local)
 
     totals: Dict[int, Dict[str, float]] = {}
-
-    competencias_cartao = {(mes, ano)}
-    if (
-        mes_cartao_referencia is not None
-        and ano_cartao_referencia is not None
-        and (mes_cartao_referencia, ano_cartao_referencia) != (mes, ano)
-    ):
-        competencias_cartao.add((mes_cartao_referencia, ano_cartao_referencia))
-    idx_ref = int(ano) * 12 + (int(mes) - 1)
-
-    # Chaves pagas do mês alvo (reutilizado no cálculo de pago).
-    cur.execute(
-        """
-        SELECT pessoa_id, tipo, item_id
-        FROM pagamentos_terceiros_itens
-        WHERE mes_referencia = ? AND ano_referencia = ?;
-        """,
-        (mes, ano),
-    )
-    pagos_mes_keys = {
-        (int(r["pessoa_id"]), str(r["tipo"]), int(r["item_id"]))
-        for r in cur.fetchall()
-    }
-
-    # Parceladas com histórico (carrega uma vez e reutiliza no cálculo de total e pago).
-    cur.execute(
-        """
-        SELECT
-            cp.id,
-            cp.pessoa_id,
-            cp.descricao,
-            cp.valor_parcela,
-            cp.total_parcelas,
-            cp.parcela_atual,
-            cp.mes_inicio,
-            cp.ano_inicio,
-            cp.status
-        FROM cartao_parceladas cp
-        WHERE cp.pessoa_id IS NOT NULL
-        """
-    )
-    parceladas = cur.fetchall()
-    quitadas_por_item_pessoa: Dict[Tuple[int, int], int] = {}
-    historico_parceladas: Dict[Tuple[int, int], Dict[str, int | None]] = {}
-    if parceladas:
-        ids_parceladas = [int(r["id"]) for r in parceladas]
-        filtros_ids = ", ".join(["?"] * len(ids_parceladas))
-        cur.execute(
-            f"""
-            SELECT pessoa_id, item_id, COUNT(DISTINCT (ano_referencia * 100 + mes_referencia)) AS qtd_quitadas
-            FROM pagamentos_terceiros_itens
-            WHERE tipo = 'cartao_parcelada'
-              AND item_id IN ({filtros_ids})
-            GROUP BY pessoa_id, item_id;
-            """,
-            tuple(ids_parceladas),
-        )
-        quitadas_por_item_pessoa = {
-            (int(r["pessoa_id"]), int(r["item_id"])): int(r["qtd_quitadas"])
-            for r in cur.fetchall()
+    chave_mes = f"{int(ano)}-{int(mes):02d}"
+    for pessoa_id in pessoa_ids:
+        contas = listar_contas_status_pessoa_meses(
+            pessoa_id,
+            [(mes, ano)],
+            mes_cartao_referencia,
+            ano_cartao_referencia,
+            conn=conn_local,
+        ).get(chave_mes, [])
+        total_mes = sum(float(c["valor"]) for c in contas)
+        total_pago = sum(float(c["valor"]) for c in contas if bool(c.get("pago")))
+        total_mes -= float(descontos_manuais.get(pessoa_id, 0.0))
+        if total_mes < 0:
+            total_mes = 0.0
+        if total_pago > total_mes:
+            total_pago = total_mes
+        totals[pessoa_id] = {
+            "total_mes": total_mes,
+            "total_pago": total_pago,
+            "saldo_pendente": max(total_mes - total_pago, 0.0),
         }
-        cur.execute(
-            f"""
-            SELECT pessoa_id, item_id, descricao_item
-            FROM pagamentos_terceiros_itens
-            WHERE tipo = 'cartao_parcelada'
-              AND item_id IN ({filtros_ids});
-            """,
-            tuple(ids_parceladas),
-        )
-        for r in cur.fetchall():
-            pessoa_id = int(r["pessoa_id"])
-            item_id = int(r["item_id"])
-            parcela_num, _ = _extrair_parcela_descricao(r["descricao_item"])
-            if parcela_num is None:
-                continue
-            chave = (pessoa_id, item_id)
-            info = historico_parceladas.setdefault(
-                chave,
-                {"ultima_parcela": None},
-            )
-            if info["ultima_parcela"] is None or parcela_num > int(info["ultima_parcela"]):
-                info["ultima_parcela"] = parcela_num
-
-    parceladas_contabilizadas: set[Tuple[int, int]] = set()
-    parceladas_por_chave = {
-        (int(row["pessoa_id"]), int(row["id"])): row for row in parceladas
-    }
-
-    # Parceladas: soma quando houver parcela correspondente ao(s) mês(es) em foco,
-    # inclusive itens já finalizados que ainda tenham parcelas futuras inferidas pelo histórico.
-    for row in parceladas:
-        pessoa_id = row["pessoa_id"]
-        if pessoa_id is None:
-            continue
-        parcela_atual = int(row["parcela_atual"])
-        total_parcelas = int(row["total_parcelas"])
-        item_id = int(row["id"])
-        historico = historico_parceladas.get((int(pessoa_id), item_id), {})
-        ultima_parcela_paga = int(historico.get("ultima_parcela") or 0)
-        status_item = str(row["status"] or "Ativa")
-        if ultima_parcela_paga:
-            parcela_base = ultima_parcela_paga + 1
-            if parcela_base > total_parcelas:
-                continue
-        else:
-            if status_item != "Ativa":
-                continue
-            parcela_base = parcela_atual
-            restantes = max(total_parcelas - parcela_atual + 1, 0)
-            if int(quitadas_por_item_pessoa.get((int(pessoa_id), item_id), 0)) >= restantes:
-                continue
-
-        idx_inicio = _indice_competencia(
-            int(row["mes_inicio"]),
-            int(row["ano_inicio"]),
-        )
-
-        conta_no_mes = False
-        for mes_ref, ano_ref in competencias_cartao:
-            idx_ref_comp = _indice_competencia(mes_ref, ano_ref)
-            delta = idx_ref_comp - int(idx_inicio)
-            parcela_num = 1 + delta
-            # Inclui a parcela da competência consultada mesmo se já quitada;
-            # parcela_base aponta só para a próxima pendente (previsão futura).
-            if 1 <= parcela_num <= total_parcelas:
-                conta_no_mes = True
-                break
-
-        if conta_no_mes:
-            totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
-            totals[pessoa_id]["total_mes"] += float(row["valor_parcela"])
-            parceladas_contabilizadas.add((int(pessoa_id), item_id))
-    filtros_cartao = " OR ".join(
-        ["(mes_referencia = ? AND ano_referencia = ?)"] * len(competencias_cartao)
-    )
-    params_cartao: List[int] = []
-    for mes_ref, ano_ref in sorted(competencias_cartao):
-        params_cartao.extend([mes_ref, ano_ref])
-    cur.execute(
-        f"""
-        SELECT id, pessoa_id, valor, mes_referencia, ano_referencia
-        FROM cartao_avista
-        WHERE pessoa_id IS NOT NULL
-          AND ({filtros_cartao});
-        """,
-        tuple(params_cartao),
-    )
-    avista_rows = cur.fetchall()
-    for row in avista_rows:
-        pessoa_id = row["pessoa_id"]
-        totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
-        totals[pessoa_id]["total_mes"] += float(row["valor"])
-
-    cur.execute(
-        """
-        SELECT pessoa_id, COALESCE(SUM(valor), 0) AS total
-        FROM gastos_pix
-        WHERE pessoa_id IS NOT NULL
-          AND (
-                (mes_referencia < 12 AND mes_referencia + 1 = ? AND ano_referencia = ?)
-             OR (mes_referencia = 12 AND 1 = ? AND ano_referencia + 1 = ?)
-          )
-        GROUP BY pessoa_id;
-        """,
-        (mes, ano, mes, ano),
-    )
-    gastos_pix_por_pessoa = {
-        int(r["pessoa_id"]): float(r["total"]) for r in cur.fetchall()
-    }
-    for pessoa_id, total_gastos in gastos_pix_por_pessoa.items():
-        totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
-        totals[pessoa_id]["total_mes"] += float(total_gastos)
-
-    cur.execute(
-        """
-        SELECT
-            p.id AS pessoa_id,
-            COALESCE(cf.valor_padrao, 0) AS valor_padrao,
-            cf.id AS conta_id,
-            cf.mes_referencia,
-            cf.ano_referencia,
-            cf.vencimento_data,
-            cf.status
-        FROM pessoas p
-        JOIN contas_fixas cf
-          ON LOWER(TRIM(COALESCE(cf.desconto_pessoa_nome, ''))) = LOWER(TRIM(p.nome))
-        WHERE COALESCE(cf.valor_padrao, 0) > 0
-          AND (
-                ((cf.ano_referencia * 12) + (cf.mes_referencia - 1)) BETWEEN ? AND ?
-             OR cf.vencimento_data IS NOT NULL
-          );
-        """
-        ,
-        (idx_ref - 1, idx_ref + 1),
-    )
-    contas_fixas_vinculadas = cur.fetchall()
-    for row in contas_fixas_vinculadas:
-        mes_cf, ano_cf = _competencia_conta_fixa(
-            int(row["mes_referencia"]),
-            int(row["ano_referencia"]),
-            row["vencimento_data"],
-        )
-        if (mes_cf, ano_cf) != (mes, ano):
-            continue
-        pessoa_id = row["pessoa_id"]
-        totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
-        totals[pessoa_id]["total_mes"] += float(row["valor_padrao"])
-
-    descontos_manuais = obter_descontos_manuais_por_pessoa(mes, ano, conn=conn_local)
-    for pessoa_id, valor_desc in descontos_manuais.items():
-        totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
-        totals[pessoa_id]["total_mes"] -= float(valor_desc)
-        if float(totals[pessoa_id]["total_mes"]) < 0:
-            totals[pessoa_id]["total_mes"] = 0.0
-
-    # Total pago em lote para evitar N consultas (uma por pessoa) na tela de cadastro.
-    total_pago_por_pessoa: Dict[int, float] = {}
-
-    def _add_pago(pid: int, valor: float) -> None:
-        total_pago_por_pessoa[pid] = float(total_pago_por_pessoa.get(pid, 0.0)) + float(valor)
-
-    for row in avista_rows:
-        pid = int(row["pessoa_id"])
-        item_id = int(row["id"])
-        if int(row["mes_referencia"]) == int(mes) and int(row["ano_referencia"]) == int(ano):
-            if (pid, "cartao_avista", item_id) in pagos_mes_keys:
-                _add_pago(pid, float(row["valor"]))
-
-    cur.execute(
-        """
-        SELECT pessoa_id, id, valor
-        FROM gastos_pix
-        WHERE pessoa_id IS NOT NULL
-          AND (
-                (mes_referencia < 12 AND mes_referencia + 1 = ? AND ano_referencia = ?)
-             OR (mes_referencia = 12 AND 1 = ? AND ano_referencia + 1 = ?)
-          );
-        """,
-        (mes, ano, mes, ano),
-    )
-    for row in cur.fetchall():
-        pid = int(row["pessoa_id"])
-        item_id = int(row["id"])
-        if (pid, "gasto_pix", item_id) in pagos_mes_keys:
-            _add_pago(pid, float(row["valor"]))
-
-    # Parceladas pagas no mês alvo (reaproveita carga de parceladas + mapa de quitadas).
-    for row in parceladas:
-        pid = int(row["pessoa_id"])
-        item_id = int(row["id"])
-        if (pid, "cartao_parcelada", item_id) not in pagos_mes_keys:
-            continue
-        total_parcelas = int(row["total_parcelas"])
-        idx_inicio = _indice_competencia(
-            int(row["mes_inicio"]),
-            int(row["ano_inicio"]),
-        )
-        delta = idx_ref - int(idx_inicio)
-        parcela_num = 1 + delta
-        if parcela_num < 1 or parcela_num > total_parcelas:
-            continue
-        _add_pago(pid, float(row["valor_parcela"]))
-
-    # Parceladas históricas já finalizadas podem não aparecer mais como ativas, mas o
-    # pagamento do mês consultado continua sendo parte do total daquela pessoa.
-    cur.execute(
-        """
-        SELECT pessoa_id, item_id, valor
-        FROM pagamentos_terceiros_itens
-        WHERE tipo = 'cartao_parcelada'
-          AND mes_referencia = ?
-          AND ano_referencia = ?;
-        """,
-        (mes, ano),
-    )
-    for row in cur.fetchall():
-        pid = int(row["pessoa_id"])
-        item_id = int(row["item_id"])
-        valor = float(row["valor"])
-        if (pid, item_id) in parceladas_contabilizadas:
-            continue
-        row_parcelada = parceladas_por_chave.get((pid, item_id))
-        if row_parcelada is not None and _parcela_num_cartao_parcelada(
-            int(row_parcelada["mes_inicio"]),
-            int(row_parcelada["ano_inicio"]),
-            int(row_parcelada["total_parcelas"]),
-            mes,
-            ano,
-        ) is None:
-            continue
-        totals.setdefault(pid, {"total_mes": 0.0, "total_pago": 0.0})
-        totals[pid]["total_mes"] += valor
-        _add_pago(pid, valor)
-
-    # Conta fixa paga no mês alvo (status ou item pago), respeitando competência por vencimento.
-    for row in contas_fixas_vinculadas:
-        mes_cf, ano_cf = _competencia_conta_fixa(
-            int(row["mes_referencia"]),
-            int(row["ano_referencia"]),
-            row["vencimento_data"],
-        )
-        if (mes_cf, ano_cf) != (mes, ano):
-            continue
-        pid = int(row["pessoa_id"])
-        conta_id = int(row["conta_id"])
-        status_pago = _status_conta_fixa_pago(row["status"])
-        pago_por_item = (pid, "conta_fixa", conta_id) in pagos_mes_keys
-        if status_pago or pago_por_item:
-            _add_pago(pid, float(row["valor_padrao"]))
 
     if close_conn:
         conn_local.close()
-
-    for pessoa_id, total_pago_real in total_pago_por_pessoa.items():
-        totals.setdefault(pessoa_id, {"total_mes": 0.0, "total_pago": 0.0})
-        totals[pessoa_id]["total_pago"] = float(total_pago_real)
-
-    # Calcula saldo pendente
-    for pessoa_id, info in totals.items():
-        if float(info["total_pago"]) > float(info["total_mes"]):
-            info["total_pago"] = float(info["total_mes"])
-        info["saldo_pendente"] = max(float(info["total_mes"]) - float(info["total_pago"]), 0.0)
-
     return totals
 
 
@@ -2138,14 +2035,6 @@ def carregar_detalhe_pessoa_pagina(
             (pessoa_id,),
         )
         parceladas_rows = cur.fetchall()
-        for row in parceladas_rows:
-            cartao_service.reconciliar_pagamentos_terceiros_parcelada(
-                cur,
-                int(row["id"]),
-                int(row["mes_inicio"]),
-                int(row["ano_inicio"]),
-                int(row["total_parcelas"]),
-            )
         historico_parceladas = _carregar_historico_parceladas_pessoa(
             cur, pessoa_id, parceladas_rows
         )
@@ -2243,6 +2132,5 @@ def carregar_detalhe_pessoa_pagina(
         }
     finally:
         if close_conn:
-            conn_local.commit()
             conn_local.close()
 
