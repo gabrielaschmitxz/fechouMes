@@ -1,11 +1,13 @@
 """Aplicação Flask principal para Fechou Mês - Controle Financeiro"""
-from flask import Flask, render_template, request, redirect, url_for, flash, session, g
+from flask import Flask, render_template, request, redirect, url_for, flash, session, g, send_from_directory
 from datetime import datetime
 from decimal import Decimal
+import json
 import logging
 import sys
 import os
 import time
+import mimetypes
 from pathlib import Path
 
 # Adiciona o diretório raiz ao path
@@ -22,10 +24,63 @@ from finance_app.services import (
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
 app.logger.setLevel(logging.INFO)
+STATIC_ICONS_DIR = Path(__file__).parent / "static" / "icons"
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # Inicializa banco de dados
 setup_database()
 app.logger.info("App iniciada com backend de banco: %s", "postgres" if USE_POSTGRES else "sqlite")
+for _icone in ("favicon-32.png", "apple-touch-icon.png", "icon-192.png", "icon-512.png"):
+    if not (STATIC_ICONS_DIR / _icone).is_file():
+        app.logger.warning("Icone PWA ausente em producao: static/icons/%s", _icone)
+
+
+@app.route("/favicon.ico")
+def favicon():
+    if not (STATIC_ICONS_DIR / "favicon-32.png").is_file():
+        return "", 404
+    return send_from_directory(STATIC_ICONS_DIR, "favicon-32.png", mimetype="image/png")
+
+
+@app.route("/manifest.webmanifest")
+def web_manifest():
+    manifest = {
+        "name": "Fechou Mês",
+        "short_name": "Fechou Mês",
+        "description": "Controle financeiro pessoal",
+        "start_url": url_for("dashboard"),
+        "scope": "/",
+        "display": "standalone",
+        "orientation": "any",
+        "background_color": "#0f1a33",
+        "theme_color": "#0f1a33",
+        "lang": "pt-BR",
+        "icons": [
+            {
+                "src": url_for("static", filename="icons/icon-192.png"),
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": url_for("static", filename="icons/icon-512.png"),
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": url_for("static", filename="icons/icon-512.png"),
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "maskable",
+            },
+        ],
+    }
+    return app.response_class(
+        response=json.dumps(manifest, ensure_ascii=False),
+        status=200,
+        mimetype="application/manifest+json",
+    )
 
 
 def _mes_ano_atual():
@@ -193,9 +248,7 @@ def _to_float(value, default=0.0):
 @app.before_request
 def _require_login():
     g.request_started_at = time.perf_counter()
-    if request.path == "/favicon.ico":
-        return redirect(url_for("static", filename="icons/favicon-32.png"))
-    public_endpoints = {"login", "static"}
+    public_endpoints = {"login", "static", "favicon", "web_manifest"}
     if request.endpoint is None or request.endpoint in public_endpoints:
         return
     if session.get("user_id"):

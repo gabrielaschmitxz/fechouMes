@@ -77,12 +77,12 @@
     </div>
     <div id="categoria-detalhe" class="dashboard-categorias-detalhe" hidden>
         <h5 id="categoria-detalhe-titulo" style="margin: 0 0 0.75rem 0; color: #2d3748;"></h5>
-        <div class="table table-blue">
+        <div class="table table-blue dashboard-categorias-detalhe-table">
             <table>
                 <thead>
                     <tr>
                         <th>Descrição</th>
-                        <th style="text-align: right; width: 140px;">Valor</th>
+                        <th class="dashboard-categorias-col-valor">Valor</th>
                     </tr>
                 </thead>
                 <tbody id="categoria-detalhe-corpo"></tbody>
@@ -137,6 +137,7 @@
     ];
 
     const canvas = document.getElementById("chartCategorias");
+    const chartWrap = canvas ? canvas.closest(".dashboard-categorias-chart-wrap") : null;
     const detalhe = document.getElementById("categoria-detalhe");
     const hint = document.getElementById("categoria-detalhe-hint");
     const titulo = document.getElementById("categoria-detalhe-titulo");
@@ -145,6 +146,60 @@
 
     const fmtMoeda = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const fmtPct = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+    function estimarLinhasLegenda(n, largura, posicao) {
+        if (posicao === "right") {
+            return n;
+        }
+        const porLinha = Math.max(1, Math.floor(largura / 150));
+        return Math.ceil(n / porLinha);
+    }
+
+    function layoutGrafico() {
+        const w = window.innerWidth;
+        const n = categorias.length;
+        const wrapWidth = chartWrap ? chartWrap.clientWidth : 320;
+
+        if (w <= 834) {
+            const posicao = "bottom";
+            const linhas = estimarLinhasLegenda(n, wrapWidth, posicao);
+            return {
+                legendPosition: posicao,
+                height: Math.min(wrapWidth, 220) + linhas * 24 + 32,
+                labels: { boxWidth: 10, padding: 8, font: { size: 11 } },
+            };
+        }
+        if (w <= 1194) {
+            if (n > 5) {
+                const posicao = "right";
+                return {
+                    legendPosition: posicao,
+                    height: Math.max(280, Math.min(440, n * 22 + 72)),
+                    labels: { boxWidth: 12, padding: 8, font: { size: 11 } },
+                };
+            }
+            const posicao = "bottom";
+            const linhas = estimarLinhasLegenda(n, wrapWidth, posicao);
+            return {
+                legendPosition: posicao,
+                height: Math.min(wrapWidth, 250) + linhas * 24 + 28,
+                labels: { boxWidth: 12, padding: 10, font: { size: 12 } },
+            };
+        }
+        const posicao = "bottom";
+        const linhas = estimarLinhasLegenda(n, wrapWidth, posicao);
+        return {
+            legendPosition: posicao,
+            height: Math.min(wrapWidth, 280) + linhas * 24 + 28,
+            labels: { boxWidth: 14, padding: 12, font: { size: 12 } },
+        };
+    }
+
+    function aplicarAlturaGrafico(layout) {
+        if (chartWrap) {
+            chartWrap.style.height = layout.height + "px";
+        }
+    }
 
     function mostrarCategoria(indice) {
         const cat = categorias[indice];
@@ -156,7 +211,7 @@
             const tdDesc = document.createElement("td");
             tdDesc.textContent = item.descricao;
             const tdValor = document.createElement("td");
-            tdValor.style.textAlign = "right";
+            tdValor.className = "dashboard-categorias-col-valor";
             tdValor.textContent = fmtMoeda.format(item.valor);
             tr.appendChild(tdDesc);
             tr.appendChild(tdValor);
@@ -167,7 +222,10 @@
         detalhe.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
-    new Chart(canvas, {
+    let layoutAtual = layoutGrafico();
+    aplicarAlturaGrafico(layoutAtual);
+
+    const chart = new Chart(canvas, {
         type: "pie",
         data: {
             labels: categorias.map(function (c) {
@@ -182,20 +240,23 @@
         },
         options: {
             responsive: true,
-            maintainAspectRatio: true,
+            maintainAspectRatio: false,
             onClick: function (_evt, elements) {
                 if (!elements.length) return;
                 mostrarCategoria(elements[0].index);
             },
+            layout: {
+                padding: { top: 4, bottom: 8, left: 4, right: 4 }
+            },
             plugins: {
                 legend: {
-                    position: "bottom",
+                    position: layoutAtual.legendPosition,
                     onClick: function (_evt, legendItem) {
                         if (legendItem && legendItem.index !== undefined) {
                             mostrarCategoria(legendItem.index);
                         }
                     },
-                    labels: { boxWidth: 14, padding: 12, font: { size: 12 } }
+                    labels: layoutAtual.labels
                 },
                 tooltip: {
                     callbacks: {
@@ -207,6 +268,17 @@
                 }
             }
         }
+    });
+
+    window.addEventListener("resize", function () {
+        const novoLayout = layoutGrafico();
+        if (novoLayout.legendPosition !== layoutAtual.legendPosition) {
+            chart.options.plugins.legend.position = novoLayout.legendPosition;
+        }
+        chart.options.plugins.legend.labels = novoLayout.labels;
+        layoutAtual = novoLayout;
+        aplicarAlturaGrafico(layoutAtual);
+        chart.resize();
     });
 
     canvas.style.cursor = "pointer";
