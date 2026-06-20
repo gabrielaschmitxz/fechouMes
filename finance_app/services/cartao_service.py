@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from datetime import date
+import re
 import unicodedata
 from typing import Dict, List, Tuple
 
@@ -629,35 +630,52 @@ def atualizar_avista(
     return ok
 
 
-def _deslocar_pagamentos_terceiros_parcelada(
+def _extrair_parcela_descricao(texto: object | None) -> Tuple[int | None, int | None]:
+    descricao = str(texto or "")
+    match = re.search(r"parcela\s+(\d+)\s*/\s*(\d+)", descricao, flags=re.IGNORECASE)
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
+
+
+def reconciliar_pagamentos_terceiros_parcelada(
     cur,
     lancamento_id: int,
-    delta_meses: int,
+    mes_inicio: int,
+    ano_inicio: int,
+    total_parcelas: int,
 ) -> None:
-    if delta_meses == 0:
-        return
+    """Alinha mes_referencia dos pagamentos à competência atual de cada parcela."""
+    total_parcelas = max(1, int(total_parcelas))
+    idx_inicio = _indice_competencia(mes_inicio, ano_inicio)
+    idx_fim = idx_inicio + total_parcelas - 1
     cur.execute(
         """
-        SELECT id, mes_referencia, ano_referencia
+        SELECT id, descricao_item, mes_referencia, ano_referencia
         FROM pagamentos_terceiros_itens
         WHERE tipo = 'cartao_parcelada' AND item_id = ?;
         """,
         (lancamento_id,),
     )
     for row in cur.fetchall():
-        novo_mes, novo_ano = _add_meses(
-            int(row["mes_referencia"]),
-            int(row["ano_referencia"]),
-            delta_meses,
-        )
-        cur.execute(
-            """
-            UPDATE pagamentos_terceiros_itens
-            SET mes_referencia = ?, ano_referencia = ?
-            WHERE id = ?;
-            """,
-            (novo_mes, novo_ano, int(row["id"])),
-        )
+        parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
+        if parcela_num is not None and 1 <= parcela_num <= total_parcelas:
+            novo_mes, novo_ano = _add_meses(mes_inicio, ano_inicio, parcela_num - 1)
+            cur.execute(
+                """
+                UPDATE pagamentos_terceiros_itens
+                SET mes_referencia = ?, ano_referencia = ?
+                WHERE id = ?;
+                """,
+                (novo_mes, novo_ano, int(row["id"])),
+            )
+            continue
+        idx_pag = _indice_competencia(int(row["mes_referencia"]), int(row["ano_referencia"]))
+        if idx_pag < idx_inicio or idx_pag > idx_fim:
+            cur.execute(
+                "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
+                (int(row["id"]),),
+            )
 
 
 def atualizar_parcelada(
@@ -684,8 +702,6 @@ def atualizar_parcelada(
     if not row_atual:
         conn.close()
         return False
-    mes_inicio_anterior = int(row_atual["mes_inicio"])
-    ano_inicio_anterior = int(row_atual["ano_inicio"])
     categoria_id = _resolver_categoria_lancamento(pessoa_id, categoria_id, descricao, conn=conn)
     cur.execute(
         """
@@ -708,11 +724,13 @@ def atualizar_parcelada(
     )
     ok = cur.rowcount > 0
     if ok:
-        delta_meses = _indice_competencia(mes_inicio, ano_inicio) - _indice_competencia(
-            mes_inicio_anterior,
-            ano_inicio_anterior,
+        reconciliar_pagamentos_terceiros_parcelada(
+            cur,
+            lancamento_id,
+            mes_inicio,
+            ano_inicio,
+            total_parcelas,
         )
-        _deslocar_pagamentos_terceiros_parcelada(cur, lancamento_id, delta_meses)
     conn.commit()
     conn.close()
     return ok

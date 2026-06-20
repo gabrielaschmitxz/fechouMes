@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 from finance_app.database import USE_POSTGRES, get_connection
 from finance_app.services import gastos_service
+from finance_app.services import cartao_service
 from finance_app.models import Pessoa
 
 
@@ -525,6 +526,19 @@ def _indice_competencia(mes: int, ano: int) -> int:
     return (int(ano) * 12) + (int(mes) - 1)
 
 
+def _parcela_num_cartao_parcelada(
+    mes_inicio: int,
+    ano_inicio: int,
+    total_parcelas: int,
+    mes_ref: int,
+    ano_ref: int,
+) -> int | None:
+    parcela_num = _indice_competencia(mes_ref, ano_ref) - _indice_competencia(mes_inicio, ano_inicio) + 1
+    if 1 <= parcela_num <= int(total_parcelas):
+        return parcela_num
+    return None
+
+
 def _competencia_primeira_parcela(
     mes_referencia: int,
     ano_referencia: int,
@@ -1038,6 +1052,7 @@ def listar_contas_status_pessoa_meses(
         )
 
     parceladas_adicionadas: set[Tuple[int, int, int]] = set()
+    parceladas_por_id = {int(r["id"]): r for r in parceladas_ativas}
     for r in parceladas_ativas:
         item_id = int(r["id"])
         total_parcelas = int(r["total_parcelas"])
@@ -1080,6 +1095,15 @@ def listar_contas_status_pessoa_meses(
         m_ref = int(r["mes_referencia"])
         a_ref = int(r["ano_referencia"])
         if (item_id, m_ref, a_ref) in parceladas_adicionadas:
+            continue
+        row_parcelada = parceladas_por_id.get(item_id)
+        if row_parcelada is not None and _parcela_num_cartao_parcelada(
+            int(row_parcelada["mes_inicio"]),
+            int(row_parcelada["ano_inicio"]),
+            int(row_parcelada["total_parcelas"]),
+            m_ref,
+            a_ref,
+        ) is None:
             continue
         mapa[f"{a_ref}-{m_ref:02d}"].append(
             {
@@ -1623,6 +1647,9 @@ def calcular_totais_por_pessoa(
                 info["ultima_parcela"] = parcela_num
 
     parceladas_contabilizadas: set[Tuple[int, int]] = set()
+    parceladas_por_chave = {
+        (int(row["pessoa_id"]), int(row["id"])): row for row in parceladas
+    }
 
     # Parceladas: soma quando houver parcela correspondente ao(s) mês(es) em foco,
     # inclusive itens já finalizados que ainda tenham parcelas futuras inferidas pelo histórico.
@@ -1815,10 +1842,20 @@ def calcular_totais_por_pessoa(
         pid = int(row["pessoa_id"])
         item_id = int(row["item_id"])
         valor = float(row["valor"])
-        if (pid, item_id) not in parceladas_contabilizadas:
-            totals.setdefault(pid, {"total_mes": 0.0, "total_pago": 0.0})
-            totals[pid]["total_mes"] += valor
-            _add_pago(pid, valor)
+        if (pid, item_id) in parceladas_contabilizadas:
+            continue
+        row_parcelada = parceladas_por_chave.get((pid, item_id))
+        if row_parcelada is not None and _parcela_num_cartao_parcelada(
+            int(row_parcelada["mes_inicio"]),
+            int(row_parcelada["ano_inicio"]),
+            int(row_parcelada["total_parcelas"]),
+            mes,
+            ano,
+        ) is None:
+            continue
+        totals.setdefault(pid, {"total_mes": 0.0, "total_pago": 0.0})
+        totals[pid]["total_mes"] += valor
+        _add_pago(pid, valor)
 
     # Conta fixa paga no mês alvo (status ou item pago), respeitando competência por vencimento.
     for row in contas_fixas_vinculadas:
@@ -2101,6 +2138,14 @@ def carregar_detalhe_pessoa_pagina(
             (pessoa_id,),
         )
         parceladas_rows = cur.fetchall()
+        for row in parceladas_rows:
+            cartao_service.reconciliar_pagamentos_terceiros_parcelada(
+                cur,
+                int(row["id"]),
+                int(row["mes_inicio"]),
+                int(row["ano_inicio"]),
+                int(row["total_parcelas"]),
+            )
         historico_parceladas = _carregar_historico_parceladas_pessoa(
             cur, pessoa_id, parceladas_rows
         )
@@ -2198,5 +2243,6 @@ def carregar_detalhe_pessoa_pagina(
         }
     finally:
         if close_conn:
+            conn_local.commit()
             conn_local.close()
 
