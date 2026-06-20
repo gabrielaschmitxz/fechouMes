@@ -538,35 +538,12 @@ def _parcela_num_cartao_parcelada(
     return None
 
 
-def _carregar_parcelas_pagas_por_item(cur, pessoa_id: int) -> Dict[int, set[int]]:
-    """Parcelas quitadas por item_id (número da parcela extraído do pagamento)."""
-    cur.execute(
-        """
-        SELECT item_id, descricao_item
-        FROM pagamentos_terceiros_itens
-        WHERE pessoa_id = ? AND tipo = 'cartao_parcelada';
-        """,
-        (pessoa_id,),
-    )
-    mapa: Dict[int, set[int]] = {}
-    for row in cur.fetchall():
-        parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
-        if parcela_num is None:
-            continue
-        mapa.setdefault(int(row["item_id"]), set()).add(int(parcela_num))
-    return mapa
-
-
 def _cartao_parcelada_esta_paga(
-    parcelas_pagas: Dict[int, set[int]],
     pagos_keys: set,
     item_id: int,
-    parcela_num: int,
     mes_ref: int,
     ano_ref: int,
 ) -> bool:
-    if int(parcela_num) in parcelas_pagas.get(int(item_id), set()):
-        return True
     return ("cartao_parcelada", int(item_id), int(mes_ref), int(ano_ref)) in pagos_keys
 
 
@@ -1238,8 +1215,6 @@ def listar_contas_status_pessoa_meses(
         )
 
     parceladas_adicionadas: set[Tuple[int, int, int]] = set()
-    parceladas_por_id = {int(r["id"]): r for r in parceladas_ativas}
-    parcelas_pagas_por_item = _carregar_parcelas_pagas_por_item(cur, pessoa_id)
     for r in parceladas_ativas:
         item_id = int(r["id"])
         total_parcelas = int(r["total_parcelas"])
@@ -1253,14 +1228,7 @@ def listar_contas_status_pessoa_meses(
             m_ref = (idx_ref % 12) + 1
             a_ref = idx_ref // 12
             parcela_num = idx_ref - int(idx_primeiro) + 1
-            pago = _cartao_parcelada_esta_paga(
-                parcelas_pagas_por_item,
-                pagos_keys,
-                item_id,
-                parcela_num,
-                m_ref,
-                a_ref,
-            )
+            pago = _cartao_parcelada_esta_paga(pagos_keys, item_id, m_ref, a_ref)
             parceladas_adicionadas.add((item_id, m_ref, a_ref))
             mapa[f"{a_ref}-{m_ref:02d}"].append(
                 {
@@ -1273,43 +1241,6 @@ def listar_contas_status_pessoa_meses(
                     "pago": pago,
                 }
             )
-
-    cur.execute(
-        """
-        SELECT item_id, descricao_item, valor, mes_referencia, ano_referencia
-        FROM pagamentos_terceiros_itens
-        WHERE pessoa_id = ?
-          AND tipo = 'cartao_parcelada'
-          AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
-        """,
-        (pessoa_id, idx_min_calc, idx_max_calc),
-    )
-    for r in cur.fetchall():
-        item_id = int(r["item_id"])
-        m_ref = int(r["mes_referencia"])
-        a_ref = int(r["ano_referencia"])
-        if (item_id, m_ref, a_ref) in parceladas_adicionadas:
-            continue
-        row_parcelada = parceladas_por_id.get(item_id)
-        if row_parcelada is not None and _parcela_num_cartao_parcelada(
-            int(row_parcelada["mes_inicio"]),
-            int(row_parcelada["ano_inicio"]),
-            int(row_parcelada["total_parcelas"]),
-            m_ref,
-            a_ref,
-        ) is None:
-            continue
-        mapa[f"{a_ref}-{m_ref:02d}"].append(
-            {
-                "tipo": "cartao_parcelada",
-                "item_id": item_id,
-                "descricao": _descricao_pagamento_parcelada(r["descricao_item"]),
-                "valor": float(r["valor"]),
-                "mes_referencia": m_ref,
-                "ano_referencia": a_ref,
-                "pago": True,
-            }
-        )
 
     # Cartão à vista nas competências carregadas.
     cur.execute(
@@ -1401,10 +1332,7 @@ def listar_contas_status_pessoa_meses(
                 continue
             chave = f"{a_cf}-{m_cf:02d}"
             item_id = int(r["id"])
-            pago = bool(
-                _status_conta_fixa_pago(r["status"])
-                or ("conta_fixa", item_id, m_cf, a_cf) in pagos_keys
-            )
+            pago = ("conta_fixa", item_id, m_cf, a_cf) in pagos_keys
             mes_inicio_serie, ano_inicio_serie = inicio_serie_por_chave.get(
                 _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor_padrao"]),
                 (int(r["mes_referencia"]), int(r["ano_referencia"])),

@@ -638,17 +638,17 @@ def _extrair_parcela_descricao(texto: object | None) -> Tuple[int | None, int | 
     return int(match.group(1)), int(match.group(2))
 
 
-def reconciliar_pagamentos_terceiros_parcelada(
+def realinhar_pagamentos_parcelada(
     cur,
     lancamento_id: int,
     mes_inicio: int,
     ano_inicio: int,
     total_parcelas: int,
-) -> None:
-    """Alinha mes_referencia dos pagamentos à competência atual de cada parcela."""
+) -> Dict[str, int]:
+    """Recoloca pagamentos existentes nos meses corretos conforme parcela na descrição.
+    Nunca apaga histórico — só atualiza mes_referencia/ano_referencia."""
     total_parcelas = max(1, int(total_parcelas))
-    idx_inicio = _indice_competencia(mes_inicio, ano_inicio)
-    idx_fim = idx_inicio + total_parcelas - 1
+    stats = {"atualizados": 0, "ignorados": 0, "conflitos": 0}
     cur.execute(
         """
         SELECT id, pessoa_id, descricao_item, mes_referencia, ano_referencia
@@ -657,50 +657,20 @@ def reconciliar_pagamentos_terceiros_parcelada(
         """,
         (lancamento_id,),
     )
-    pagamentos = [dict(row) for row in cur.fetchall()]
-    if not pagamentos:
-        return
-
-    por_parcela: Dict[int, List[Dict[str, object]]] = {}
-    for row in pagamentos:
+    for row in cur.fetchall():
         parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
-        if parcela_num is not None and 1 <= parcela_num <= total_parcelas:
-            por_parcela.setdefault(parcela_num, []).append(row)
+        if parcela_num is None or parcela_num < 1 or parcela_num > total_parcelas:
+            stats["ignorados"] += 1
             continue
-        idx_pag = _indice_competencia(int(row["mes_referencia"]), int(row["ano_referencia"]))
-        if idx_pag < idx_inicio or idx_pag > idx_fim:
-            cur.execute(
-                "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
-                (int(row["id"]),),
-            )
-
-    for parcela_num, grupo in por_parcela.items():
         alvo_mes, alvo_ano = _add_meses(mes_inicio, ano_inicio, parcela_num - 1)
-        no_alvo = [
-            row
-            for row in grupo
-            if int(row["mes_referencia"]) == alvo_mes and int(row["ano_referencia"]) == alvo_ano
-        ]
-        if no_alvo:
-            for row in grupo:
-                if int(row["id"]) != int(no_alvo[0]["id"]):
-                    cur.execute(
-                        "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
-                        (int(row["id"]),),
-                    )
+        if (
+            int(row["mes_referencia"]) == alvo_mes
+            and int(row["ano_referencia"]) == alvo_ano
+        ):
             continue
-
-        row_manter = max(grupo, key=lambda item: int(item["id"]))
-        for row in grupo:
-            if int(row["id"]) != int(row_manter["id"]):
-                cur.execute(
-                    "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
-                    (int(row["id"]),),
-                )
         cur.execute(
             """
-            SELECT id
-            FROM pagamentos_terceiros_itens
+            SELECT id FROM pagamentos_terceiros_itens
             WHERE pessoa_id = ?
               AND tipo = 'cartao_parcelada'
               AND item_id = ?
@@ -709,23 +679,15 @@ def reconciliar_pagamentos_terceiros_parcelada(
               AND id != ?;
             """,
             (
-                int(row_manter["pessoa_id"]),
+                int(row["pessoa_id"]),
                 lancamento_id,
                 alvo_mes,
                 alvo_ano,
-                int(row_manter["id"]),
+                int(row["id"]),
             ),
         )
         if cur.fetchone():
-            cur.execute(
-                "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
-                (int(row_manter["id"]),),
-            )
-            continue
-        if (
-            int(row_manter["mes_referencia"]) == alvo_mes
-            and int(row_manter["ano_referencia"]) == alvo_ano
-        ):
+            stats["conflitos"] += 1
             continue
         cur.execute(
             """
@@ -733,8 +695,194 @@ def reconciliar_pagamentos_terceiros_parcelada(
             SET mes_referencia = ?, ano_referencia = ?
             WHERE id = ?;
             """,
-            (alvo_mes, alvo_ano, int(row_manter["id"])),
+            (alvo_mes, alvo_ano, int(row["id"])),
         )
+        stats["atualizados"] += 1
+    return stats
+
+
+def _atualizar_parcela_atual_por_pagamentos(cur, lancamento_id: int, total_parcelas: int) -> None:
+    cur.execute(
+        """
+        SELECT descricao_item FROM pagamentos_terceiros_itens
+        WHERE tipo = 'cartao_parcelada' AND item_id = ?;
+        """,
+        (lancamento_id,),
+    )
+    ultima_paga = 0
+    for row in cur.fetchall():
+        parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
+        if parcela_num is not None:
+            ultima_paga = max(ultima_paga, int(parcela_num))
+    if ultima_paga <= 0:
+        return
+    parcela_atual = min(max(ultima_paga + 1, 1), int(total_parcelas))
+    status = "Finalizada" if ultima_paga >= int(total_parcelas) else "Ativa"
+    cur.execute(
+        """
+        UPDATE cartao_parceladas
+        SET parcela_atual = ?, status = ?
+        WHERE id = ?;
+        """,
+        (parcela_atual, status, lancamento_id),
+    )
+
+
+def realinhar_todos_pagamentos_parcelados(conn=None) -> Dict[str, object]:
+    """Realinha todos os pagamentos de parcelas ao mes_inicio atual de cada plano."""
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+    cur.execute(
+        """
+        SELECT id, mes_inicio, ano_inicio, total_parcelas
+        FROM cartao_parceladas;
+        """
+    )
+    totais = {"planos": 0, "atualizados": 0, "ignorados": 0, "conflitos": 0}
+    for row in cur.fetchall():
+        stats = realinhar_pagamentos_parcelada(
+            cur,
+            int(row["id"]),
+            int(row["mes_inicio"]),
+            int(row["ano_inicio"]),
+            int(row["total_parcelas"]),
+        )
+        _atualizar_parcela_atual_por_pagamentos(cur, int(row["id"]), int(row["total_parcelas"]))
+        totais["planos"] += 1
+        totais["atualizados"] += stats["atualizados"]
+        totais["ignorados"] += stats["ignorados"]
+        totais["conflitos"] += stats["conflitos"]
+    if close_conn:
+        conn_local.commit()
+        conn_local.close()
+    return totais
+
+
+def _parcelas_pagas_plano(cur, lancamento_id: int) -> set[int]:
+    cur.execute(
+        """
+        SELECT descricao_item FROM pagamentos_terceiros_itens
+        WHERE tipo = 'cartao_parcelada' AND item_id = ?;
+        """,
+        (lancamento_id,),
+    )
+    parcelas: set[int] = set()
+    for row in cur.fetchall():
+        parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
+        if parcela_num is not None:
+            parcelas.add(int(parcela_num))
+    return parcelas
+
+
+def restaurar_parcelas_sequenciais_faltantes(conn=None) -> Dict[str, object]:
+    """Recria pagamentos faltantes de parcelas 1..N quando há lacunas no histórico."""
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+    cur.execute(
+        """
+        SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual,
+               mes_inicio, ano_inicio, status, pessoa_id
+        FROM cartao_parceladas
+        WHERE pessoa_id IS NOT NULL;
+        """
+    )
+    totais: Dict[str, object] = {"planos": 0, "criados": 0, "detalhes": []}
+    for row in cur.fetchall():
+        lancamento_id = int(row["id"])
+        pessoa_id = int(row["pessoa_id"])
+        total_parcelas = max(1, int(row["total_parcelas"]))
+        mes_inicio = int(row["mes_inicio"])
+        ano_inicio = int(row["ano_inicio"])
+        descricao = str(row["descricao"])
+        valor = float(row["valor_parcela"])
+        parcelas_pagas = _parcelas_pagas_plano(cur, lancamento_id)
+        if not parcelas_pagas:
+            continue
+        totais["planos"] = int(totais["planos"]) + 1
+        max_paga = max(parcelas_pagas)
+        alvo = max_paga
+        status = str(row["status"] or "")
+        parcela_atual = int(row["parcela_atual"] or 1)
+        if status == "Finalizada":
+            alvo = total_parcelas
+        elif parcela_atual >= total_parcelas and max_paga == total_parcelas - 1:
+            alvo = total_parcelas
+
+        criados_plano = 0
+        for parcela_num in range(1, alvo + 1):
+            if parcela_num in parcelas_pagas:
+                continue
+            mes_ref, ano_ref = _add_meses(mes_inicio, ano_inicio, parcela_num - 1)
+            cur.execute(
+                """
+                SELECT id FROM pagamentos_terceiros_itens
+                WHERE pessoa_id = ?
+                  AND tipo = 'cartao_parcelada'
+                  AND item_id = ?
+                  AND mes_referencia = ?
+                  AND ano_referencia = ?;
+                """,
+                (pessoa_id, lancamento_id, mes_ref, ano_ref),
+            )
+            if cur.fetchone():
+                continue
+            descricao_item = (
+                f"Cartão parcelado: {descricao} (parcela {parcela_num}/{total_parcelas})"
+            )
+            descricao_pag = f"Restauração automática — {descricao_item}"
+            if USE_POSTGRES:
+                cur.execute(
+                    """
+                    INSERT INTO pagamentos_terceiros
+                    (pessoa_id, valor, descricao, mes_referencia, ano_referencia)
+                    VALUES (?, ?, ?, ?, ?)
+                    RETURNING id;
+                    """,
+                    (pessoa_id, valor, descricao_pag, mes_ref, ano_ref),
+                )
+                pagamento_id = int(cur.fetchone()["id"])
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO pagamentos_terceiros
+                    (pessoa_id, valor, descricao, mes_referencia, ano_referencia)
+                    VALUES (?, ?, ?, ?, ?);
+                    """,
+                    (pessoa_id, valor, descricao_pag, mes_ref, ano_ref),
+                )
+                pagamento_id = int(cur.lastrowid)
+            cur.execute(
+                """
+                INSERT INTO pagamentos_terceiros_itens
+                (pagamento_id, pessoa_id, tipo, item_id, descricao_item, valor,
+                 mes_referencia, ano_referencia)
+                VALUES (?, ?, 'cartao_parcelada', ?, ?, ?, ?, ?);
+                """,
+                (
+                    pagamento_id,
+                    pessoa_id,
+                    lancamento_id,
+                    descricao_item,
+                    valor,
+                    mes_ref,
+                    ano_ref,
+                ),
+            )
+            criados_plano += 1
+            totais["criados"] = int(totais["criados"]) + 1
+
+        if criados_plano:
+            _atualizar_parcela_atual_por_pagamentos(cur, lancamento_id, total_parcelas)
+            detalhes = totais.setdefault("detalhes", [])
+            if isinstance(detalhes, list):
+                detalhes.append({"id": lancamento_id, "descricao": descricao, "criados": criados_plano})
+
+    if close_conn:
+        conn_local.commit()
+        conn_local.close()
+    return totais
 
 
 def atualizar_parcelada(
@@ -783,13 +931,14 @@ def atualizar_parcelada(
     )
     ok = cur.rowcount > 0
     if ok:
-        reconciliar_pagamentos_terceiros_parcelada(
+        realinhar_pagamentos_parcelada(
             cur,
             lancamento_id,
             mes_inicio,
             ano_inicio,
             total_parcelas,
         )
+        _atualizar_parcela_atual_por_pagamentos(cur, lancamento_id, total_parcelas)
     conn.commit()
     conn.close()
     return ok
