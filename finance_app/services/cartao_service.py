@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 from datetime import date
-import re
 import unicodedata
 from typing import Dict, List, Tuple
 
@@ -50,14 +49,6 @@ def _normalizar_parcela_atual_no_banco(cur) -> None:
         WHERE parcela_atual > total_parcelas;
         """
     )
-
-
-def _extrair_parcela_descricao(texto: object | None) -> Tuple[int | None, int | None]:
-    descricao = str(texto or "")
-    match = re.search(r"parcela\s+(\d+)\s*/\s*(\d+)", descricao, flags=re.IGNORECASE)
-    if not match:
-        return None, None
-    return int(match.group(1)), int(match.group(2))
 
 
 def listar_categorias() -> List[CartaoCategoria]:
@@ -556,42 +547,14 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
         """
     )
     parceladas = [dict(r) for r in cur.fetchall()]
-    historico_primeira_competencia: Dict[int, int] = {}
-    if parceladas:
-        ids_parceladas = [int(item["id"]) for item in parceladas]
-        filtros_ids = ", ".join(["?"] * len(ids_parceladas))
-        cur.execute(
-            f"""
-            SELECT item_id, descricao_item, mes_referencia, ano_referencia
-            FROM pagamentos_terceiros_itens
-            WHERE tipo = 'cartao_parcelada'
-              AND item_id IN ({filtros_ids});
-            """,
-            tuple(ids_parceladas),
-        )
-        for row in cur.fetchall():
-            item_id = int(row["item_id"])
-            parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
-            if parcela_num is None:
-                continue
-            idx_primeiro = _indice_competencia(
-                int(row["mes_referencia"]),
-                int(row["ano_referencia"]),
-            ) - (parcela_num - 1)
-            if item_id not in historico_primeira_competencia or idx_primeiro < historico_primeira_competencia[item_id]:
-                historico_primeira_competencia[item_id] = idx_primeiro
 
     for item in parceladas:
         total_parcelas = int(item.get("total_parcelas") or 1)
         parcela_atual = int(item.get("parcela_atual") or 1)
         status = str(item.get("status") or "")
-        idx_primeiro = historico_primeira_competencia.get(int(item["id"]))
-        if idx_primeiro is None:
-            # mes_inicio/ano_inicio no cadastro = competência da 1ª parcela (igual à fatura).
-            mes_inicio = int(item.get("mes_inicio") or 1)
-            ano_inicio = int(item.get("ano_inicio") or date.today().year)
-        else:
-            mes_inicio, ano_inicio = (idx_primeiro % 12) + 1, idx_primeiro // 12
+        # mes_inicio/ano_inicio no cadastro = competência da 1ª parcela (igual à fatura).
+        mes_inicio = int(item.get("mes_inicio") or 1)
+        ano_inicio = int(item.get("ano_inicio") or date.today().year)
 
         for off in range(total_parcelas):
             parcela_exibicao = off + 1
@@ -666,6 +629,37 @@ def atualizar_avista(
     return ok
 
 
+def _deslocar_pagamentos_terceiros_parcelada(
+    cur,
+    lancamento_id: int,
+    delta_meses: int,
+) -> None:
+    if delta_meses == 0:
+        return
+    cur.execute(
+        """
+        SELECT id, mes_referencia, ano_referencia
+        FROM pagamentos_terceiros_itens
+        WHERE tipo = 'cartao_parcelada' AND item_id = ?;
+        """,
+        (lancamento_id,),
+    )
+    for row in cur.fetchall():
+        novo_mes, novo_ano = _add_meses(
+            int(row["mes_referencia"]),
+            int(row["ano_referencia"]),
+            delta_meses,
+        )
+        cur.execute(
+            """
+            UPDATE pagamentos_terceiros_itens
+            SET mes_referencia = ?, ano_referencia = ?
+            WHERE id = ?;
+            """,
+            (novo_mes, novo_ano, int(row["id"])),
+        )
+
+
 def atualizar_parcelada(
     lancamento_id: int,
     descricao: str,
@@ -682,6 +676,16 @@ def atualizar_parcelada(
     parcela_atual = max(1, min(int(parcela_atual), total_parcelas))
     conn = get_connection()
     cur = conn.cursor()
+    cur.execute(
+        "SELECT mes_inicio, ano_inicio FROM cartao_parceladas WHERE id = ?;",
+        (lancamento_id,),
+    )
+    row_atual = cur.fetchone()
+    if not row_atual:
+        conn.close()
+        return False
+    mes_inicio_anterior = int(row_atual["mes_inicio"])
+    ano_inicio_anterior = int(row_atual["ano_inicio"])
     categoria_id = _resolver_categoria_lancamento(pessoa_id, categoria_id, descricao, conn=conn)
     cur.execute(
         """
@@ -703,6 +707,12 @@ def atualizar_parcelada(
         ),
     )
     ok = cur.rowcount > 0
+    if ok:
+        delta_meses = _indice_competencia(mes_inicio, ano_inicio) - _indice_competencia(
+            mes_inicio_anterior,
+            ano_inicio_anterior,
+        )
+        _deslocar_pagamentos_terceiros_parcelada(cur, lancamento_id, delta_meses)
     conn.commit()
     conn.close()
     return ok
