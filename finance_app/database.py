@@ -594,8 +594,38 @@ def _apply_cartao_categorias_migration(cur: CursorCompat) -> None:
         )
 
 
+def _apply_parcela_inicio_migration(cur: CursorCompat) -> None:
+    if USE_POSTGRES:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'cartao_parceladas';
+            """
+        )
+        cols = {str(r["column_name"]) for r in cur.fetchall()}
+        if "parcela_inicio" not in cols:
+            cur.execute(
+                """
+                ALTER TABLE cartao_parceladas
+                ADD COLUMN parcela_inicio INTEGER NOT NULL DEFAULT 1;
+                """
+            )
+    else:
+        cur.execute("PRAGMA table_info(cartao_parceladas);")
+        cols = {str(r["name"]) for r in cur.fetchall()}
+        if "parcela_inicio" not in cols:
+            cur.execute(
+                """
+                ALTER TABLE cartao_parceladas
+                ADD COLUMN parcela_inicio INTEGER NOT NULL DEFAULT 1;
+                """
+            )
+
+
 def _apply_migrations(cur: CursorCompat) -> None:
     _apply_cartao_categorias_migration(cur)
+    _apply_parcela_inicio_migration(cur)
     if USE_POSTGRES:
         cur.execute(
             """

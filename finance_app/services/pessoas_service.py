@@ -7,6 +7,11 @@ from datetime import date, datetime
 
 from finance_app.database import USE_POSTGRES, get_connection
 from finance_app.services import gastos_service
+from finance_app.services.cartao_service import (
+    idx_fim_parcelada,
+    parcela_inicio_cadastro,
+    parcela_num_na_competencia,
+)
 from finance_app.models import Pessoa
 
 
@@ -341,18 +346,6 @@ def _indice_inicio_lancamentos_pessoa(
     """Menor competência (índice) com lançamento ou pagamento da pessoa."""
     candidatos = [int(indice_fallback)]
 
-    cur.execute(
-        """
-        SELECT MIN((ano_referencia * 12) + (mes_referencia - 1)) AS idx
-        FROM cartao_avista
-        WHERE pessoa_id = ?;
-        """,
-        (pessoa_id,),
-    )
-    row = cur.fetchone()
-    if row and row["idx"] is not None:
-        candidatos.append(int(row["idx"]))
-
     if parceladas_pessoa is None:
         cur.execute(
             """
@@ -363,52 +356,31 @@ def _indice_inicio_lancamentos_pessoa(
             (pessoa_id,),
         )
         parceladas_pessoa = cur.fetchall()
-    if parceladas_pessoa:
-        if historico_parcelas is None:
-            historico_parcelas = _carregar_historico_parceladas_pessoa(
-                cur, pessoa_id, parceladas_pessoa
-            )
-        for row in parceladas_pessoa:
-            item_id = int(row["id"])
-            candidatos.append(
-                _primeiro_idx_parcelada_item(row, historico_parcelas.get(item_id))
-            )
+    for row in parceladas_pessoa:
+        item_id = int(row["id"])
+        candidatos.append(
+            _primeiro_idx_parcelada_item(row, historico_parcelas.get(item_id) if historico_parcelas else None)
+        )
 
     cur.execute(
         """
-        SELECT MIN((ano_referencia * 12) + (mes_referencia)) AS idx
-        FROM gastos_pix
-        WHERE pessoa_id = ?;
+        SELECT
+            (SELECT MIN((ano_referencia * 12) + (mes_referencia - 1))
+             FROM cartao_avista WHERE pessoa_id = ?) AS avista_min,
+            (SELECT MIN((ano_referencia * 12) + (mes_referencia))
+             FROM gastos_pix WHERE pessoa_id = ?) AS pix_min,
+            (SELECT MIN((ano_referencia * 12) + (mes_referencia - 1))
+             FROM pagamentos_terceiros_itens WHERE pessoa_id = ?) AS pag_min,
+            (SELECT MIN((ano_referencia * 12) + (mes_referencia - 1))
+             FROM pessoas_descontos_itens WHERE pessoa_id = ?) AS desc_min;
         """,
-        (pessoa_id,),
+        (pessoa_id, pessoa_id, pessoa_id, pessoa_id),
     )
-    row = cur.fetchone()
-    if row and row["idx"] is not None:
-        candidatos.append(int(row["idx"]))
-
-    cur.execute(
-        """
-        SELECT MIN((ano_referencia * 12) + (mes_referencia - 1)) AS idx
-        FROM pagamentos_terceiros_itens
-        WHERE pessoa_id = ?;
-        """,
-        (pessoa_id,),
-    )
-    row = cur.fetchone()
-    if row and row["idx"] is not None:
-        candidatos.append(int(row["idx"]))
-
-    cur.execute(
-        """
-        SELECT MIN((ano_referencia * 12) + (mes_referencia - 1)) AS idx
-        FROM pessoas_descontos_itens
-        WHERE pessoa_id = ?;
-        """,
-        (pessoa_id,),
-    )
-    row = cur.fetchone()
-    if row and row["idx"] is not None:
-        candidatos.append(int(row["idx"]))
+    mins_row = cur.fetchone()
+    if mins_row:
+        for col in ("avista_min", "pix_min", "pag_min", "desc_min"):
+            if mins_row[col] is not None:
+                candidatos.append(int(mins_row[col]))
 
     if nome_pessoa:
         cur.execute(
@@ -500,16 +472,26 @@ def obter_indice_inicio_lancamentos_pessoa(
     mes_fallback: int,
     ano_fallback: int,
     conn=None,
+    batch: Dict[str, object] | None = None,
 ) -> int:
     close_conn = conn is None
     conn_local = conn or get_connection()
     cur = conn_local.cursor()
-    nome = _obter_nome_pessoa(cur, pessoa_id)
+    if batch is not None:
+        nome = batch["nomes_por_pessoa"].get(pessoa_id)
+        parceladas = batch["parceladas_por_pessoa"].get(pessoa_id, [])
+        historico = batch["historico_por_pessoa"].get(pessoa_id, {})
+    else:
+        nome = _obter_nome_pessoa(cur, pessoa_id)
+        parceladas = None
+        historico = None
     idx = _indice_inicio_lancamentos_pessoa(
         cur,
         pessoa_id,
         nome,
         _indice_competencia(mes_fallback, ano_fallback),
+        parceladas_pessoa=parceladas,
+        historico_parcelas=historico,
     )
     if close_conn:
         conn_local.close()
@@ -528,14 +510,14 @@ def _indice_competencia(mes: int, ano: int) -> int:
 def _parcela_num_cartao_parcelada(
     mes_inicio: int,
     ano_inicio: int,
+    parcela_inicio: int,
     total_parcelas: int,
     mes_ref: int,
     ano_ref: int,
 ) -> int | None:
-    parcela_num = _indice_competencia(mes_ref, ano_ref) - _indice_competencia(mes_inicio, ano_inicio) + 1
-    if 1 <= parcela_num <= int(total_parcelas):
-        return parcela_num
-    return None
+    return parcela_num_na_competencia(
+        mes_inicio, ano_inicio, parcela_inicio, total_parcelas, mes_ref, ano_ref
+    )
 
 
 def _cartao_parcelada_esta_paga(
@@ -966,6 +948,7 @@ def listar_contas_pendentes_pessoa(
             cp.parcela_atual AS parcela_atual,
             cp.mes_inicio AS mes_inicio,
             cp.ano_inicio AS ano_inicio,
+            COALESCE(cp.parcela_inicio, 1) AS parcela_inicio,
             COALESCE(q.qtd_quitadas, 0) AS qtd_quitadas
         FROM cartao_parceladas cp
         LEFT JOIN (
@@ -996,12 +979,13 @@ def listar_contas_pendentes_pessoa(
     idx_ref = ano_referencia * 12 + (mes_referencia - 1)
     for r in cur.fetchall():
         idx_inicio = _indice_competencia(int(r["mes_inicio"]), int(r["ano_inicio"]))
-        parcela_num = idx_ref - idx_inicio + 1
+        parcela_inicio = parcela_inicio_cadastro(r)
+        parcela_num = idx_ref - idx_inicio + parcela_inicio
         total_parcelas = int(r["total_parcelas"])
         restantes = max(total_parcelas - int(r["parcela_atual"]) + 1, 0)
         if int(r["qtd_quitadas"]) >= restantes:
             continue
-        if parcela_num < 1 or parcela_num > total_parcelas:
+        if parcela_num < parcela_inicio or parcela_num > total_parcelas:
             continue
         pendentes.append(
             {
@@ -1129,6 +1113,111 @@ def listar_contas_pendentes_pessoa(
     return sorted(pendentes, key=lambda x: str(x["descricao"]).lower())
 
 
+def criar_batch_status_pessoa(cur, idx_min: int, idx_max: int) -> Dict[str, object]:
+    """Pré-carrega pagamentos, parceladas, avista, pix e contas fixas (evita N+1 na aba Pessoas)."""
+    if idx_max < idx_min:
+        idx_min, idx_max = idx_max, idx_min
+
+    pagos_por_pessoa: Dict[int, set] = defaultdict(set)
+    cur.execute(
+        """
+        SELECT pessoa_id, tipo, item_id, mes_referencia, ano_referencia
+        FROM pagamentos_terceiros_itens
+        WHERE ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
+        """,
+        (idx_min, idx_max),
+    )
+    for r in cur.fetchall():
+        pagos_por_pessoa[int(r["pessoa_id"])].add(
+            (
+                str(r["tipo"]),
+                int(r["item_id"]),
+                int(r["mes_referencia"]),
+                int(r["ano_referencia"]),
+            )
+        )
+
+    parceladas_por_pessoa: Dict[int, List[object]] = defaultdict(list)
+    cur.execute(
+        """
+        SELECT id, pessoa_id, descricao, valor_parcela, total_parcelas, parcela_atual,
+               mes_inicio, ano_inicio, status, COALESCE(parcela_inicio, 1) AS parcela_inicio
+        FROM cartao_parceladas;
+        """
+    )
+    for r in cur.fetchall():
+        if r["pessoa_id"] is None:
+            continue
+        parceladas_por_pessoa[int(r["pessoa_id"])].append(r)
+
+    historico_por_pessoa: Dict[int, Dict[int, Dict[str, object]]] = defaultdict(dict)
+    for pessoa_id, rows in parceladas_por_pessoa.items():
+        for row in rows:
+            historico_por_pessoa[pessoa_id].setdefault(int(row["id"]), {"ultima_parcela": None})
+
+    avista_por_pessoa: Dict[int, List[object]] = defaultdict(list)
+    cur.execute(
+        """
+        SELECT id, pessoa_id, descricao, valor, mes_referencia, ano_referencia
+        FROM cartao_avista
+        WHERE ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
+        """,
+        (idx_min, idx_max),
+    )
+    for r in cur.fetchall():
+        if r["pessoa_id"] is None:
+            continue
+        avista_por_pessoa[int(r["pessoa_id"])].append(r)
+
+    pix_por_pessoa: Dict[int, List[object]] = defaultdict(list)
+    cur.execute(
+        """
+        SELECT id, pessoa_id, descricao, valor, mes_referencia, ano_referencia
+        FROM gastos_pix
+        WHERE ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
+        """,
+        (idx_min - 1, idx_max),
+    )
+    for r in cur.fetchall():
+        if r["pessoa_id"] is None:
+            continue
+        pix_por_pessoa[int(r["pessoa_id"])].append(r)
+
+    contas_fixas_por_nome: Dict[str, List[object]] = defaultdict(list)
+    cur.execute(
+        """
+        SELECT id, nome, valor_padrao, mes_referencia, ano_referencia,
+               vencimento_data, data_fim, status, desconto_pessoa_nome
+        FROM contas_fixas
+        WHERE TRIM(COALESCE(desconto_pessoa_nome, '')) != ''
+          AND (
+                ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?
+             OR vencimento_data IS NOT NULL
+          );
+        """,
+        (idx_min - 1, idx_max + 1),
+    )
+    for r in cur.fetchall():
+        nome_norm = str(r["desconto_pessoa_nome"] or "").strip().lower()
+        if nome_norm:
+            contas_fixas_por_nome[nome_norm].append(r)
+
+    nomes_por_pessoa: Dict[int, str] = {}
+    cur.execute("SELECT id, nome FROM pessoas;")
+    for r in cur.fetchall():
+        nomes_por_pessoa[int(r["id"])] = str(r["nome"] or "")
+
+    return {
+        "pagos_por_pessoa": dict(pagos_por_pessoa),
+        "parceladas_por_pessoa": dict(parceladas_por_pessoa),
+        "historico_por_pessoa": dict(historico_por_pessoa),
+        "avista_por_pessoa": dict(avista_por_pessoa),
+        "pix_por_pessoa": dict(pix_por_pessoa),
+        "contas_fixas_por_nome": dict(contas_fixas_por_nome),
+        "nomes_por_pessoa": nomes_por_pessoa,
+    }
+
+
 def listar_contas_status_pessoa(
     pessoa_id: int,
     mes_referencia: int,
@@ -1159,6 +1248,7 @@ def listar_contas_status_pessoa_meses(
     idx_max: int | None = None,
     parceladas_rows: List[object] | None = None,
     historico_parceladas: Dict[int, Dict[str, object]] | None = None,
+    batch: Dict[str, object] | None = None,
 ) -> Dict[str, List[Dict[str, float | int | str | bool]]]:
     if idx_min is not None and idx_max is not None:
         if idx_max < idx_min:
@@ -1183,51 +1273,64 @@ def listar_contas_status_pessoa_meses(
     conn_local = conn or get_connection()
     cur = conn_local.cursor()
 
-    cur.execute(
-        """
-        SELECT tipo, item_id, mes_referencia, ano_referencia
-        FROM pagamentos_terceiros_itens
-        WHERE pessoa_id = ?
-          AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
-        """,
-        (pessoa_id, idx_min_calc, idx_max_calc),
-    )
-    pagos_keys = {
-        (str(r["tipo"]), int(r["item_id"]), int(r["mes_referencia"]), int(r["ano_referencia"]))
-        for r in cur.fetchall()
-    }
-
-    if parceladas_rows is None:
+    if batch is not None:
+        pagos_keys = batch["pagos_por_pessoa"].get(pessoa_id, set())
+    else:
         cur.execute(
             """
-            SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual, mes_inicio, ano_inicio, status
-            FROM cartao_parceladas
-            WHERE pessoa_id = ?;
+            SELECT tipo, item_id, mes_referencia, ano_referencia
+            FROM pagamentos_terceiros_itens
+            WHERE pessoa_id = ?
+              AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
             """,
-            (pessoa_id,),
+            (pessoa_id, idx_min_calc, idx_max_calc),
         )
-        parceladas_ativas = cur.fetchall()
+        pagos_keys = {
+            (str(r["tipo"]), int(r["item_id"]), int(r["mes_referencia"]), int(r["ano_referencia"]))
+            for r in cur.fetchall()
+        }
+
+    if parceladas_rows is None:
+        if batch is not None:
+            parceladas_ativas = batch["parceladas_por_pessoa"].get(pessoa_id, [])
+        else:
+            cur.execute(
+                """
+                SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual, mes_inicio, ano_inicio, status,
+                       COALESCE(parcela_inicio, 1) AS parcela_inicio
+                FROM cartao_parceladas
+                WHERE pessoa_id = ?;
+                """,
+                (pessoa_id,),
+            )
+            parceladas_ativas = cur.fetchall()
     else:
         parceladas_ativas = parceladas_rows
     if historico_parceladas is None:
-        historico_parceladas = _carregar_historico_parceladas_pessoa(
-            cur, pessoa_id, parceladas_ativas
-        )
+        if batch is not None:
+            historico_parceladas = batch["historico_por_pessoa"].get(pessoa_id, {})
+        else:
+            historico_parceladas = _carregar_historico_parceladas_pessoa(
+                cur, pessoa_id, parceladas_ativas
+            )
 
     parceladas_adicionadas: set[Tuple[int, int, int]] = set()
     for r in parceladas_ativas:
         item_id = int(r["id"])
         total_parcelas = int(r["total_parcelas"])
+        parcela_inicio = parcela_inicio_cadastro(r)
         idx_primeiro = _primeiro_idx_parcelada_item(
             r, historico_parceladas.get(item_id)
         )
-        idx_parcela_fim = int(idx_primeiro) + total_parcelas - 1
+        idx_parcela_fim = idx_fim_parcelada(
+            int(r["mes_inicio"]), int(r["ano_inicio"]), parcela_inicio, total_parcelas
+        )
         idx_inicio = max(idx_min_calc, int(idx_primeiro))
         idx_fim = min(idx_max_calc, idx_parcela_fim)
         for idx_ref in range(idx_inicio, idx_fim + 1):
             m_ref = (idx_ref % 12) + 1
             a_ref = idx_ref // 12
-            parcela_num = idx_ref - int(idx_primeiro) + 1
+            parcela_num = idx_ref - int(idx_primeiro) + parcela_inicio
             pago = _cartao_parcelada_esta_paga(pagos_keys, item_id, m_ref, a_ref)
             parceladas_adicionadas.add((item_id, m_ref, a_ref))
             mapa[f"{a_ref}-{m_ref:02d}"].append(
@@ -1243,16 +1346,20 @@ def listar_contas_status_pessoa_meses(
             )
 
     # Cartão à vista nas competências carregadas.
-    cur.execute(
-        """
-        SELECT id, descricao, valor, mes_referencia, ano_referencia
-        FROM cartao_avista
-        WHERE pessoa_id = ?
-          AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
-        """,
-        (pessoa_id, idx_min_calc, idx_max_calc),
-    )
-    for r in cur.fetchall():
+    if batch is not None:
+        avista_rows = batch["avista_por_pessoa"].get(pessoa_id, [])
+    else:
+        cur.execute(
+            """
+            SELECT id, descricao, valor, mes_referencia, ano_referencia
+            FROM cartao_avista
+            WHERE pessoa_id = ?
+              AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
+            """,
+            (pessoa_id, idx_min_calc, idx_max_calc),
+        )
+        avista_rows = cur.fetchall()
+    for r in avista_rows:
         m_ref = int(r["mes_referencia"])
         a_ref = int(r["ano_referencia"])
         chave = f"{a_ref}-{m_ref:02d}"
@@ -1272,16 +1379,20 @@ def listar_contas_status_pessoa_meses(
         )
 
     # Gastos Pix nas competências carregadas.
-    cur.execute(
-        """
-        SELECT id, descricao, valor, mes_referencia, ano_referencia
-        FROM gastos_pix
-        WHERE pessoa_id = ?
-          AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
-        """,
-        (pessoa_id, idx_min_calc - 1, idx_max_calc),
-    )
-    for r in cur.fetchall():
+    if batch is not None:
+        pix_rows = batch["pix_por_pessoa"].get(pessoa_id, [])
+    else:
+        cur.execute(
+            """
+            SELECT id, descricao, valor, mes_referencia, ano_referencia
+            FROM gastos_pix
+            WHERE pessoa_id = ?
+              AND ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?;
+            """,
+            (pessoa_id, idx_min_calc - 1, idx_max_calc),
+        )
+        pix_rows = cur.fetchall()
+    for r in pix_rows:
         m_ref, a_ref = _add_meses(int(r["mes_referencia"]), int(r["ano_referencia"]), 1)
         chave = f"{a_ref}-{m_ref:02d}"
         if (m_ref, a_ref) not in refs_set:
@@ -1300,21 +1411,28 @@ def listar_contas_status_pessoa_meses(
         )
 
     # Contas fixas vinculadas à pessoa.
-    nome_pessoa = _obter_nome_pessoa(cur, pessoa_id)
+    if batch is not None:
+        nome_pessoa = batch["nomes_por_pessoa"].get(pessoa_id)
+    else:
+        nome_pessoa = _obter_nome_pessoa(cur, pessoa_id)
     if nome_pessoa:
-        cur.execute(
-            """
-            SELECT id, nome, valor_padrao, mes_referencia, ano_referencia, vencimento_data, data_fim, status
-            FROM contas_fixas
-            WHERE LOWER(TRIM(COALESCE(desconto_pessoa_nome, ''))) = LOWER(TRIM(?))
-              AND (
-                    ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?
-                 OR vencimento_data IS NOT NULL
-              );
-            """,
-            (nome_pessoa, idx_min_calc - 1, idx_max_calc + 1),
-        )
-        contas_fixas_rows = cur.fetchall()
+        if batch is not None:
+            nome_norm = nome_pessoa.strip().lower()
+            contas_fixas_rows = batch["contas_fixas_por_nome"].get(nome_norm, [])
+        else:
+            cur.execute(
+                """
+                SELECT id, nome, valor_padrao, mes_referencia, ano_referencia, vencimento_data, data_fim, status
+                FROM contas_fixas
+                WHERE LOWER(TRIM(COALESCE(desconto_pessoa_nome, ''))) = LOWER(TRIM(?))
+                  AND (
+                        ((ano_referencia * 12) + (mes_referencia - 1)) BETWEEN ? AND ?
+                     OR vencimento_data IS NOT NULL
+                  );
+                """,
+                (nome_pessoa, idx_min_calc - 1, idx_max_calc + 1),
+            )
+            contas_fixas_rows = cur.fetchall()
         inicio_serie_por_chave: Dict[Tuple[str, str, str], Tuple[int, int]] = {}
         for r in contas_fixas_rows:
             chave_serie = _chave_serie_conta_fixa(r["nome"], r["data_fim"], r["valor_padrao"])
@@ -1396,6 +1514,7 @@ def _listar_contas_status_pessoa_legacy(
             cp.parcela_atual AS parcela_atual,
             cp.mes_inicio AS mes_inicio,
             cp.ano_inicio AS ano_inicio,
+            COALESCE(cp.parcela_inicio, 1) AS parcela_inicio,
             ? AS mes_referencia,
             ? AS ano_referencia,
             EXISTS (
@@ -1440,8 +1559,9 @@ def _listar_contas_status_pessoa_legacy(
         if int(r["qtd_quitadas"]) >= restantes:
             continue
         idx_inicio = _indice_competencia(int(r["mes_inicio"]), int(r["ano_inicio"]))
-        parcela_num = idx_ref - idx_inicio + 1
-        if parcela_num < 1 or parcela_num > total_parcelas:
+        parcela_inicio = parcela_inicio_cadastro(r)
+        parcela_num = idx_ref - idx_inicio + parcela_inicio
+        if parcela_num < parcela_inicio or parcela_num > total_parcelas:
             continue
         contas.append(
             {
@@ -1677,24 +1797,38 @@ def calcular_totais_por_pessoa(
     mes_cartao_referencia: int | None = None,
     ano_cartao_referencia: int | None = None,
     conn=None,
+    batch: Dict[str, object] | None = None,
 ) -> Dict[int, Dict[str, float]]:
     """Retorna dicionário {pessoa_id: {'total_mes': ..., 'total_pago': ..., 'saldo_pendente': ...}}."""
     close_conn = conn is None
     conn_local = conn or get_connection()
     cur = conn_local.cursor()
-    cur.execute("SELECT id FROM pessoas;")
-    pessoa_ids = [int(row["id"]) for row in cur.fetchall()]
+    cur.execute("SELECT id, padrao FROM pessoas;")
+    pessoas_rows = cur.fetchall()
     descontos_manuais = obter_descontos_manuais_por_pessoa(mes, ano, conn=conn_local)
+
+    idx_mes = _indice_competencia(mes, ano)
+    if batch is None:
+        batch = criar_batch_status_pessoa(cur, idx_mes, idx_mes)
 
     totals: Dict[int, Dict[str, float]] = {}
     chave_mes = f"{int(ano)}-{int(mes):02d}"
-    for pessoa_id in pessoa_ids:
+    for row in pessoas_rows:
+        pessoa_id = int(row["id"])
+        if bool(row["padrao"]):
+            totals[pessoa_id] = {
+                "total_mes": 0.0,
+                "total_pago": 0.0,
+                "saldo_pendente": 0.0,
+            }
+            continue
         contas = listar_contas_status_pessoa_meses(
             pessoa_id,
             [(mes, ano)],
             mes_cartao_referencia,
             ano_cartao_referencia,
             conn=conn_local,
+            batch=batch,
         ).get(chave_mes, [])
         total_mes = sum(float(c["valor"]) for c in contas)
         total_pago = sum(float(c["valor"]) for c in contas if bool(c.get("pago")))
@@ -1816,6 +1950,7 @@ def listar_previsao_contas_por_mes_pessoa(
             cp.mes_inicio,
             cp.ano_inicio,
             cp.status,
+            COALESCE(cp.parcela_inicio, 1) AS parcela_inicio,
             COALESCE(q.qtd_quitadas, 0) AS qtd_quitadas
         FROM cartao_parceladas cp
         LEFT JOIN (
@@ -1840,11 +1975,12 @@ def listar_previsao_contas_por_mes_pessoa(
     for r in parceladas_prev:
         valor = float(r["valor_parcela"])
         total_parcelas = int(r["total_parcelas"])
+        parcela_inicio = parcela_inicio_cadastro(r)
         idx_primeiro = _primeiro_idx_parcelada_item(
             r, historico_prev.get(int(r["id"]))
         )
-        for parcela_num in range(1, total_parcelas + 1):
-            off = parcela_num - 1
+        for parcela_num in range(parcela_inicio, total_parcelas + 1):
+            off = parcela_num - parcela_inicio
             idx_comp = int(idx_primeiro) + off
             mes_i, ano_i = (idx_comp % 12) + 1, idx_comp // 12
             add_item(
@@ -1947,35 +2083,51 @@ def carregar_detalhe_pessoa_pagina(
     mes_cartao_referencia: int | None = None,
     ano_cartao_referencia: int | None = None,
     conn=None,
+    batch: Dict[str, object] | None = None,
+    inicio_idx: int | None = None,
 ) -> Dict[str, object]:
     """Carrega contas por mês, descontos e resumo de previsão para a aba da pessoa (uma passagem no banco)."""
     close_conn = conn is None
     conn_local = conn or get_connection()
     cur = conn_local.cursor()
     try:
-        nome_pessoa = _obter_nome_pessoa(cur, pessoa_id)
-        cur.execute(
-            """
-            SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual, mes_inicio, ano_inicio, status
-            FROM cartao_parceladas
-            WHERE pessoa_id = ?;
-            """,
-            (pessoa_id,),
-        )
-        parceladas_rows = cur.fetchall()
-        historico_parceladas = _carregar_historico_parceladas_pessoa(
-            cur, pessoa_id, parceladas_rows
-        )
-        inicio_idx = _indice_inicio_lancamentos_pessoa(
-            cur,
-            pessoa_id,
-            nome_pessoa,
-            _indice_competencia(mes, ano),
-            parceladas_pessoa=parceladas_rows,
-            historico_parcelas=historico_parceladas,
-        )
+        if batch is not None:
+            nome_pessoa = batch["nomes_por_pessoa"].get(pessoa_id)
+        else:
+            nome_pessoa = _obter_nome_pessoa(cur, pessoa_id)
+        if batch is not None:
+            parceladas_rows = batch["parceladas_por_pessoa"].get(pessoa_id, [])
+        else:
+            cur.execute(
+                """
+                SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual, mes_inicio, ano_inicio, status,
+                       COALESCE(parcela_inicio, 1) AS parcela_inicio
+                FROM cartao_parceladas
+                WHERE pessoa_id = ?;
+                """,
+                (pessoa_id,),
+            )
+            parceladas_rows = cur.fetchall()
+        if batch is not None:
+            historico_parceladas = batch["historico_por_pessoa"].get(pessoa_id, {})
+        else:
+            historico_parceladas = _carregar_historico_parceladas_pessoa(
+                cur, pessoa_id, parceladas_rows
+            )
         idx_filtro = _indice_competencia(mes, ano)
+        if inicio_idx is None:
+            inicio_idx = _indice_inicio_lancamentos_pessoa(
+                cur,
+                pessoa_id,
+                nome_pessoa,
+                idx_filtro,
+                parceladas_pessoa=parceladas_rows,
+                historico_parcelas=historico_parceladas,
+            )
         idx_max = idx_filtro + 11
+
+        if batch is None:
+            batch = criar_batch_status_pessoa(cur, inicio_idx, idx_max)
 
         mapa_mes = listar_contas_status_pessoa_meses(
             pessoa_id,
@@ -1986,6 +2138,7 @@ def carregar_detalhe_pessoa_pagina(
             idx_max=idx_max,
             parceladas_rows=parceladas_rows,
             historico_parceladas=historico_parceladas,
+            batch=batch,
         )
 
         mes_inicio_hist = (inicio_idx % 12) + 1

@@ -14,6 +14,50 @@ def _add_meses(mes: int, ano: int, delta: int) -> Tuple[int, int]:
     return (idx % 12) + 1, idx // 12
 
 
+def parcela_inicio_cadastro(row: object) -> int:
+    """Número da parcela vigente quando o plano entrou no sistema (mes_inicio)."""
+    try:
+        val = row["parcela_inicio"]  # type: ignore[index]
+    except (KeyError, TypeError, IndexError):
+        val = None
+    return max(1, int(val or 1))
+
+
+def parcela_num_na_competencia(
+    mes_inicio: int,
+    ano_inicio: int,
+    parcela_inicio: int,
+    total_parcelas: int,
+    mes_ref: int,
+    ano_ref: int,
+) -> int | None:
+    """Retorna N/X da parcela na competência, ou None se fora do plano no sistema."""
+    off = _indice_competencia(mes_ref, ano_ref) - _indice_competencia(mes_inicio, ano_inicio)
+    parcela_num = int(parcela_inicio) + off
+    if int(parcela_inicio) <= parcela_num <= int(total_parcelas):
+        return parcela_num
+    return None
+
+
+def idx_fim_parcelada(
+    mes_inicio: int,
+    ano_inicio: int,
+    parcela_inicio: int,
+    total_parcelas: int,
+) -> int:
+    """Índice da última competência exibida para o plano no sistema."""
+    return _indice_competencia(mes_inicio, ano_inicio) + (int(total_parcelas) - int(parcela_inicio))
+
+
+def mes_competencia_parcela(
+    mes_inicio: int,
+    ano_inicio: int,
+    parcela_inicio: int,
+    parcela_num: int,
+) -> Tuple[int, int]:
+    return _add_meses(mes_inicio, ano_inicio, int(parcela_num) - int(parcela_inicio))
+
+
 def _indice_competencia(mes: int, ano: int) -> int:
     return (int(ano) * 12) + (int(mes) - 1)
 
@@ -251,7 +295,8 @@ def listar_parceladas_ativas() -> List[CartaoParcelada]:
     cur.execute(
         """
         SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual,
-               mes_inicio, ano_inicio, status, pessoa_id, categoria_id
+               mes_inicio, ano_inicio, status, pessoa_id, categoria_id,
+               COALESCE(parcela_inicio, 1) AS parcela_inicio
         FROM cartao_parceladas
         WHERE status = 'Ativa'
         ORDER BY id;
@@ -270,7 +315,8 @@ def listar_parceladas() -> List[CartaoParcelada]:
     cur.execute(
         """
         SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual,
-               mes_inicio, ano_inicio, status, pessoa_id, categoria_id
+               mes_inicio, ano_inicio, status, pessoa_id, categoria_id,
+               COALESCE(parcela_inicio, 1) AS parcela_inicio
         FROM cartao_parceladas
         ORDER BY id;
         """
@@ -297,10 +343,10 @@ def criar_parcelada(
     cur.execute(
         """
         INSERT INTO cartao_parceladas
-        (descricao, valor_parcela, total_parcelas, parcela_atual, mes_inicio, ano_inicio, status, pessoa_id, categoria_id)
-        VALUES (?, ?, ?, ?, ?, ?, 'Ativa', ?, ?);
+        (descricao, valor_parcela, total_parcelas, parcela_atual, parcela_inicio, mes_inicio, ano_inicio, status, pessoa_id, categoria_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'Ativa', ?, ?);
         """,
-        (descricao, valor_parcela, total_parcelas, parcela_atual, mes_inicio, ano_inicio, pessoa_id, categoria_id),
+        (descricao, valor_parcela, total_parcelas, parcela_atual, parcela_atual, mes_inicio, ano_inicio, pessoa_id, categoria_id),
     )
     conn.commit()
     conn.close()
@@ -365,9 +411,10 @@ def calcular_fatura_competencia(mes_ref: int, ano_ref: int) -> Dict[str, float]:
     total_parceladas_meu = 0.0
     total_parceladas_terceiros = 0.0
     for p in parceladas:
+        parcela_inicio = parcela_inicio_cadastro(p)
         idx_inicio = _indice_competencia(int(p.mes_inicio), int(p.ano_inicio))
-        parcela_num = idx_alvo - idx_inicio + 1
-        if parcela_num < 1 or parcela_num > int(p.total_parcelas):
+        parcela_num = idx_alvo - idx_inicio + parcela_inicio
+        if parcela_num < parcela_inicio or parcela_num > int(p.total_parcelas):
             continue
         if p.pessoa_id is None:
             total_parceladas_meu += float(p.valor_parcela)
@@ -416,9 +463,10 @@ def listar_gastos_por_categoria_competencia(mes_ref: int, ano_ref: int) -> Dict[
         add_item(avista.categoria_id, avista.descricao, float(avista.valor))
 
     for parcelada in listar_parceladas():
+        parcela_inicio = parcela_inicio_cadastro(parcelada)
         idx_inicio = _indice_competencia(int(parcelada.mes_inicio), int(parcelada.ano_inicio))
-        parcela_num = idx_alvo - idx_inicio + 1
-        if parcela_num < 1 or parcela_num > int(parcelada.total_parcelas):
+        parcela_num = idx_alvo - idx_inicio + parcela_inicio
+        if parcela_num < parcela_inicio or parcela_num > int(parcelada.total_parcelas):
             continue
         descricao = (
             f"{parcelada.descricao} (parcela {parcela_num}/{parcelada.total_parcelas})"
@@ -536,6 +584,7 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
             cp.valor_parcela AS valor,
             cp.total_parcelas,
             cp.parcela_atual,
+            cp.parcela_inicio,
             cp.mes_inicio,
             cp.ano_inicio,
             cp.status,
@@ -556,10 +605,12 @@ def listar_todos_lancamentos() -> List[Dict[str, object]]:
         # mes_inicio/ano_inicio no cadastro = competência da 1ª parcela (igual à fatura).
         mes_inicio = int(item.get("mes_inicio") or 1)
         ano_inicio = int(item.get("ano_inicio") or date.today().year)
+        parcela_inicio = parcela_inicio_cadastro(item)
 
-        for off in range(total_parcelas):
-            parcela_exibicao = off + 1
-            mes_ref, ano_ref = _add_meses(mes_inicio, ano_inicio, off)
+        for parcela_exibicao in range(parcela_inicio, total_parcelas + 1):
+            mes_ref, ano_ref = mes_competencia_parcela(
+                mes_inicio, ano_inicio, parcela_inicio, parcela_exibicao
+            )
             rows.append(
                 {
                     "tipo": "parcelado",
@@ -644,10 +695,12 @@ def realinhar_pagamentos_parcelada(
     mes_inicio: int,
     ano_inicio: int,
     total_parcelas: int,
+    parcela_inicio: int = 1,
 ) -> Dict[str, int]:
     """Recoloca pagamentos existentes nos meses corretos conforme parcela na descrição.
     Nunca apaga histórico — só atualiza mes_referencia/ano_referencia."""
     total_parcelas = max(1, int(total_parcelas))
+    parcela_inicio = max(1, int(parcela_inicio))
     stats = {"atualizados": 0, "ignorados": 0, "conflitos": 0}
     cur.execute(
         """
@@ -657,12 +710,21 @@ def realinhar_pagamentos_parcelada(
         """,
         (lancamento_id,),
     )
-    for row in cur.fetchall():
+    rows = list(cur.fetchall())
+    rows.sort(
+        key=lambda row: (
+            _extrair_parcela_descricao(row["descricao_item"])[0] or 0,
+            int(row["id"]),
+        )
+    )
+    for row in rows:
         parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
         if parcela_num is None or parcela_num < 1 or parcela_num > total_parcelas:
             stats["ignorados"] += 1
             continue
-        alvo_mes, alvo_ano = _add_meses(mes_inicio, ano_inicio, parcela_num - 1)
+        alvo_mes, alvo_ano = mes_competencia_parcela(
+            mes_inicio, ano_inicio, parcela_inicio, parcela_num
+        )
         if (
             int(row["mes_referencia"]) == alvo_mes
             and int(row["ano_referencia"]) == alvo_ano
@@ -728,6 +790,243 @@ def _atualizar_parcela_atual_por_pagamentos(cur, lancamento_id: int, total_parce
     )
 
 
+def _parcelas_pagamentos_reais(cur, lancamento_id: int) -> List[int]:
+    """Números de parcela em pagamentos reais (exclui restauração automática)."""
+    cur.execute(
+        """
+        SELECT pi.descricao_item
+        FROM pagamentos_terceiros_itens pi
+        JOIN pagamentos_terceiros pt ON pt.id = pi.pagamento_id
+        WHERE pi.tipo = 'cartao_parcelada'
+          AND pi.item_id = ?
+          AND COALESCE(pt.descricao, '') NOT LIKE ?;
+        """,
+        (lancamento_id, "Restauração automática%"),
+    )
+    parcelas: List[int] = []
+    for row in cur.fetchall():
+        parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
+        if parcela_num is not None:
+            parcelas.append(int(parcela_num))
+    return parcelas
+
+
+def remover_pagamentos_restauracao_automatica(cur) -> int:
+    """Apaga pagamentos fictícios criados pela restauração automática."""
+    cur.execute(
+        """
+        SELECT pi.id, pi.pagamento_id
+        FROM pagamentos_terceiros_itens pi
+        JOIN pagamentos_terceiros pt ON pt.id = pi.pagamento_id
+        WHERE COALESCE(pt.descricao, '') LIKE ?;
+        """,
+        ("Restauração automática%",),
+    )
+    rows = cur.fetchall()
+    removidos = 0
+    pagamento_ids: set[int] = set()
+    for row in rows:
+        pagamento_ids.add(int(row["pagamento_id"]))
+        cur.execute("DELETE FROM pagamentos_terceiros_itens WHERE id = ?;", (int(row["id"]),))
+        removidos += 1
+    for pag_id in pagamento_ids:
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM pagamentos_terceiros_itens WHERE pagamento_id = ?;",
+            (pag_id,),
+        )
+        if int(cur.fetchone()["c"]) == 0:
+            cur.execute("DELETE FROM pagamentos_terceiros WHERE id = ?;", (pag_id,))
+    return removidos
+
+
+def inferir_parcela_inicio(
+    cur,
+    lancamento_id: int,
+    mes_inicio: int,
+    ano_inicio: int,
+    total_parcelas: int,
+) -> int:
+    """Inferir parcela_inicio a partir de pagamentos reais (número = parcela no cartão)."""
+    cur.execute(
+        """
+        SELECT pi.descricao_item, pi.mes_referencia, pi.ano_referencia
+        FROM pagamentos_terceiros_itens pi
+        JOIN pagamentos_terceiros pt ON pt.id = pi.pagamento_id
+        WHERE pi.tipo = 'cartao_parcelada'
+          AND pi.item_id = ?
+          AND COALESCE(pt.descricao, '') NOT LIKE ?;
+        """,
+        (lancamento_id, "Restauração automática%"),
+    )
+    pagamentos: List[Tuple[int, int, int]] = []
+    for row in cur.fetchall():
+        parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
+        if parcela_num is None:
+            continue
+        pagamentos.append(
+            (int(parcela_num), int(row["mes_referencia"]), int(row["ano_referencia"]))
+        )
+    if not pagamentos:
+        cur.execute(
+            "SELECT COALESCE(parcela_inicio, 1) AS parcela_inicio FROM cartao_parceladas WHERE id = ?;",
+            (lancamento_id,),
+        )
+        row = cur.fetchone()
+        return max(1, int(row["parcela_inicio"])) if row else 1
+
+    idx_start = _indice_competencia(mes_inicio, ano_inicio)
+    nums = [p[0] for p in pagamentos]
+    min_p, max_p = min(nums), max(nums)
+
+    if len(pagamentos) == 1:
+        p_num, p_mes, p_ano = pagamentos[0]
+        return max(
+            1,
+            min(
+                p_num - (_indice_competencia(p_mes, p_ano) - idx_start),
+                int(total_parcelas),
+            ),
+        )
+
+    if max_p >= int(total_parcelas) and min_p > 1:
+        return max(1, min(min_p, int(total_parcelas)))
+
+    candidatos = [
+        p_num - (_indice_competencia(p_mes, p_ano) - idx_start) for p_num, p_mes, p_ano in pagamentos
+    ]
+    candidatos = [max(1, min(c, int(total_parcelas))) for c in candidatos]
+    if len(set(candidatos)) == 1:
+        return candidatos[0]
+    if min_p > 1:
+        return min_p
+    return 1
+
+
+def reparar_parcela_inicio_todos_planos(conn=None) -> Dict[str, object]:
+    """Recalcula parcela_inicio, remove restaurações e realinha pagamentos."""
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+    removidos = remover_pagamentos_restauracao_automatica(cur)
+    cur.execute(
+        """
+        SELECT id, mes_inicio, ano_inicio, total_parcelas, COALESCE(parcela_inicio, 1) AS parcela_inicio
+        FROM cartao_parceladas;
+        """
+    )
+    detalhes: List[Dict[str, object]] = []
+    for row in cur.fetchall():
+        plan_id = int(row["id"])
+        total = int(row["total_parcelas"])
+        mes_i, ano_i = int(row["mes_inicio"]), int(row["ano_inicio"])
+        antigo = int(row["parcela_inicio"])
+        novo = inferir_parcela_inicio(cur, plan_id, mes_i, ano_i, total)
+        if novo != antigo:
+            cur.execute(
+                "UPDATE cartao_parceladas SET parcela_inicio = ? WHERE id = ?;",
+                (novo, plan_id),
+            )
+            cur.execute(
+                "SELECT descricao FROM cartao_parceladas WHERE id = ?;",
+                (plan_id,),
+            )
+            desc = str(cur.fetchone()["descricao"])
+            detalhes.append(
+                {"id": plan_id, "descricao": desc, "de": antigo, "para": novo}
+            )
+        limpar_pagamentos_fora_sistema_parcelada(cur, plan_id)
+        realinhar_pagamentos_parcelada(cur, plan_id, mes_i, ano_i, total, novo)
+        _atualizar_parcela_atual_por_pagamentos(cur, plan_id, total)
+
+    stats = {
+        "restauracao_removidos": removidos,
+        "planos_ajustados": len(detalhes),
+        "detalhes": detalhes,
+    }
+    if close_conn:
+        conn_local.commit()
+        conn_local.close()
+    return stats
+
+
+def backfill_parcela_inicio(conn=None) -> int:
+    close_conn = conn is None
+    conn_local = conn or get_connection()
+    cur = conn_local.cursor()
+    cur.execute(
+        """
+        SELECT id, mes_inicio, ano_inicio, total_parcelas, COALESCE(parcela_inicio, 1) AS parcela_inicio
+        FROM cartao_parceladas;
+        """
+    )
+    atualizados = 0
+    for row in cur.fetchall():
+        plan_id = int(row["id"])
+        inferido = inferir_parcela_inicio(
+            cur,
+            plan_id,
+            int(row["mes_inicio"]),
+            int(row["ano_inicio"]),
+            int(row["total_parcelas"]),
+        )
+        if inferido == int(row["parcela_inicio"]):
+            continue
+        cur.execute(
+            "UPDATE cartao_parceladas SET parcela_inicio = ? WHERE id = ?;",
+            (inferido, plan_id),
+        )
+        atualizados += 1
+    if close_conn:
+        conn_local.commit()
+        conn_local.close()
+    return atualizados
+
+
+def limpar_pagamentos_fora_sistema_parcelada(cur, lancamento_id: int) -> int:
+    """Remove pagamentos de parcelas anteriores ao cadastro ou posteriores ao fim do plano."""
+    cur.execute(
+        """
+        SELECT mes_inicio, ano_inicio, total_parcelas, COALESCE(parcela_inicio, 1) AS parcela_inicio
+        FROM cartao_parceladas WHERE id = ?;
+        """,
+        (lancamento_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return 0
+    mes_inicio = int(row["mes_inicio"])
+    ano_inicio = int(row["ano_inicio"])
+    total = int(row["total_parcelas"])
+    parcela_inicio = int(row["parcela_inicio"])
+    cur.execute(
+        """
+        SELECT id, descricao_item, pagamento_id
+        FROM pagamentos_terceiros_itens
+        WHERE tipo = 'cartao_parcelada' AND item_id = ?;
+        """,
+        (lancamento_id,),
+    )
+    removidos = 0
+    pagamento_ids: set[int] = set()
+    for p in cur.fetchall():
+        parcela_num, _ = _extrair_parcela_descricao(p["descricao_item"])
+        if parcela_num is None:
+            continue
+        parcela_num = int(parcela_num)
+        if parcela_num < parcela_inicio or parcela_num > total:
+            pagamento_ids.add(int(p["pagamento_id"]))
+            cur.execute("DELETE FROM pagamentos_terceiros_itens WHERE id = ?;", (int(p["id"]),))
+            removidos += 1
+    for pag_id in pagamento_ids:
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM pagamentos_terceiros_itens WHERE pagamento_id = ?;",
+            (pag_id,),
+        )
+        if int(cur.fetchone()["c"]) == 0:
+            cur.execute("DELETE FROM pagamentos_terceiros WHERE id = ?;", (pag_id,))
+    return removidos
+
+
 def realinhar_todos_pagamentos_parcelados(conn=None) -> Dict[str, object]:
     """Realinha todos os pagamentos de parcelas ao mes_inicio atual de cada plano."""
     close_conn = conn is None
@@ -735,18 +1034,21 @@ def realinhar_todos_pagamentos_parcelados(conn=None) -> Dict[str, object]:
     cur = conn_local.cursor()
     cur.execute(
         """
-        SELECT id, mes_inicio, ano_inicio, total_parcelas
+        SELECT id, mes_inicio, ano_inicio, total_parcelas, COALESCE(parcela_inicio, 1) AS parcela_inicio
         FROM cartao_parceladas;
         """
     )
-    totais = {"planos": 0, "atualizados": 0, "ignorados": 0, "conflitos": 0}
+    totais = {"planos": 0, "atualizados": 0, "ignorados": 0, "conflitos": 0, "removidos": 0}
     for row in cur.fetchall():
+        plan_id = int(row["id"])
+        totais["removidos"] = int(totais["removidos"]) + limpar_pagamentos_fora_sistema_parcelada(cur, plan_id)
         stats = realinhar_pagamentos_parcelada(
             cur,
             int(row["id"]),
             int(row["mes_inicio"]),
             int(row["ano_inicio"]),
             int(row["total_parcelas"]),
+            int(row["parcela_inicio"]),
         )
         _atualizar_parcela_atual_por_pagamentos(cur, int(row["id"]), int(row["total_parcelas"]))
         totais["planos"] += 1
@@ -776,14 +1078,15 @@ def _parcelas_pagas_plano(cur, lancamento_id: int) -> set[int]:
 
 
 def restaurar_parcelas_sequenciais_faltantes(conn=None) -> Dict[str, object]:
-    """Recria pagamentos faltantes de parcelas 1..N quando há lacunas no histórico."""
+    """Recria pagamentos faltantes dentro do intervalo rastreado no sistema."""
     close_conn = conn is None
     conn_local = conn or get_connection()
     cur = conn_local.cursor()
     cur.execute(
         """
         SELECT id, descricao, valor_parcela, total_parcelas, parcela_atual,
-               mes_inicio, ano_inicio, status, pessoa_id
+               mes_inicio, ano_inicio, status, pessoa_id,
+               COALESCE(parcela_inicio, 1) AS parcela_inicio
         FROM cartao_parceladas
         WHERE pessoa_id IS NOT NULL;
         """
@@ -801,6 +1104,7 @@ def restaurar_parcelas_sequenciais_faltantes(conn=None) -> Dict[str, object]:
         if not parcelas_pagas:
             continue
         totais["planos"] = int(totais["planos"]) + 1
+        parcela_inicio = parcela_inicio_cadastro(row)
         max_paga = max(parcelas_pagas)
         alvo = max_paga
         status = str(row["status"] or "")
@@ -811,10 +1115,12 @@ def restaurar_parcelas_sequenciais_faltantes(conn=None) -> Dict[str, object]:
             alvo = total_parcelas
 
         criados_plano = 0
-        for parcela_num in range(1, alvo + 1):
+        for parcela_num in range(parcela_inicio, alvo + 1):
             if parcela_num in parcelas_pagas:
                 continue
-            mes_ref, ano_ref = _add_meses(mes_inicio, ano_inicio, parcela_num - 1)
+            mes_ref, ano_ref = mes_competencia_parcela(
+                mes_inicio, ano_inicio, parcela_inicio, parcela_num
+            )
             cur.execute(
                 """
                 SELECT id FROM pagamentos_terceiros_itens
@@ -902,13 +1208,14 @@ def atualizar_parcelada(
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
-        "SELECT mes_inicio, ano_inicio FROM cartao_parceladas WHERE id = ?;",
+        "SELECT mes_inicio, ano_inicio, COALESCE(parcela_inicio, 1) AS parcela_inicio FROM cartao_parceladas WHERE id = ?;",
         (lancamento_id,),
     )
     row_atual = cur.fetchone()
     if not row_atual:
         conn.close()
         return False
+    parcela_inicio = int(row_atual["parcela_inicio"])
     categoria_id = _resolver_categoria_lancamento(pessoa_id, categoria_id, descricao, conn=conn)
     cur.execute(
         """
@@ -937,6 +1244,7 @@ def atualizar_parcelada(
             mes_inicio,
             ano_inicio,
             total_parcelas,
+            parcela_inicio,
         )
         _atualizar_parcela_atual_por_pagamentos(cur, lancamento_id, total_parcelas)
     conn.commit()

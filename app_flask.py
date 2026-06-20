@@ -540,11 +540,25 @@ def cartao():
                 if status is not None and status not in {'Ativa', 'Finalizada'}:
                     flash('Status inválido.', 'warning')
                     return _redirect_cartao('lancamentos')
-                mes_inicio, ano_inicio = cartao_service.competencia_primeira_parcela(
-                    mes_competencia,
-                    ano_competencia,
-                    parcela_exibicao,
+                conn_edit = get_connection()
+                cur_edit = conn_edit.cursor()
+                cur_edit.execute(
+                    """
+                    SELECT mes_inicio, ano_inicio, COALESCE(parcela_inicio, 1) AS parcela_inicio
+                    FROM cartao_parceladas WHERE id = ?;
+                    """,
+                    (lancamento_id,),
                 )
+                row_plano = cur_edit.fetchone()
+                conn_edit.close()
+                if not row_plano:
+                    flash('Lançamento não encontrado.', 'warning')
+                    return _redirect_cartao('lancamentos')
+                mes_inicio = int(row_plano['mes_inicio'])
+                ano_inicio = int(row_plano['ano_inicio'])
+                parcela_inicio_plano = int(row_plano['parcela_inicio'])
+                if parcela_exibicao == parcela_inicio_plano:
+                    mes_inicio, ano_inicio = mes_competencia, ano_competencia
                 ok = cartao_service.atualizar_parcelada(
                     lancamento_id,
                     descricao,
@@ -1071,8 +1085,32 @@ def pessoas():
             pessoas_service.listar_pessoas(only_ativas=False, conn=conn),
             key=_ordem_pessoa,
         )
+        pessoa_ativa_id = request.args.get('pessoa_id', type=int)
+        pessoas_ativas = [p for p in pessoas_list if p.ativo and not p.padrao]
+        ids_pessoas_ativas = {p.id for p in pessoas_ativas}
+        if pessoa_ativa_id not in ids_pessoas_ativas:
+            pessoa_ativa_id = None
+
+        idx_mes = ano * 12 + (mes - 1)
+        batch = None
+        inicio_idx_pessoa = None
+        cur = conn.cursor()
+        if pessoa_ativa_id:
+            idx_max_batch = idx_mes + 11
+            idx_min_batch = idx_mes - 36
+            batch = pessoas_service.criar_batch_status_pessoa(cur, idx_min_batch, idx_max_batch)
+            inicio_idx_pessoa = pessoas_service.obter_indice_inicio_lancamentos_pessoa(
+                pessoa_ativa_id, mes, ano, conn=conn, batch=batch
+            )
+            if inicio_idx_pessoa < idx_min_batch:
+                batch = pessoas_service.criar_batch_status_pessoa(
+                    cur, inicio_idx_pessoa, idx_max_batch
+                )
+        else:
+            batch = pessoas_service.criar_batch_status_pessoa(cur, idx_mes, idx_mes)
+
         totais_por_pessoa = pessoas_service.calcular_totais_por_pessoa(
-            mes, ano, mes_cartao_alt, ano_cartao_alt, conn=conn
+            mes, ano, mes_cartao_alt, ano_cartao_alt, conn=conn, batch=batch
         )
         resumos = []
         for p in pessoas_list:
@@ -1106,11 +1144,6 @@ def pessoas():
         )
         saldo_pend_geral = total_mes_geral - total_pago_geral
 
-        pessoas_ativas = [p for p in pessoas_list if p.ativo and not p.padrao]
-        ids_pessoas_ativas = {p.id for p in pessoas_ativas}
-        pessoa_ativa_id = request.args.get('pessoa_id', type=int)
-        if pessoa_ativa_id not in ids_pessoas_ativas:
-            pessoa_ativa_id = None
         contas_status_por_pessoa_mes = {}
         descontos_itens_por_pessoa_mes = {}
         previsao_mes_por_pessoa = {}
@@ -1122,6 +1155,8 @@ def pessoas():
                 mes_cartao_alt,
                 ano_cartao_alt,
                 conn=conn,
+                batch=batch,
+                inicio_idx=inicio_idx_pessoa,
             )
             previsao_mes_por_pessoa[pessoa_ativa_id] = detalhe["previsao"]
             contas_status_por_pessoa_mes[pessoa_ativa_id] = detalhe["contas_status_por_mes"]

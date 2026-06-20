@@ -75,6 +75,7 @@ class CartaoParcelada:
     status: str
     pessoa_id: Optional[int]
     categoria_id: Optional[int] = None
+    parcela_inicio: int = 1
 
 
 @dataclass
