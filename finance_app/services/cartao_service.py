@@ -651,24 +651,21 @@ def reconciliar_pagamentos_terceiros_parcelada(
     idx_fim = idx_inicio + total_parcelas - 1
     cur.execute(
         """
-        SELECT id, descricao_item, mes_referencia, ano_referencia
+        SELECT id, pessoa_id, descricao_item, mes_referencia, ano_referencia
         FROM pagamentos_terceiros_itens
         WHERE tipo = 'cartao_parcelada' AND item_id = ?;
         """,
         (lancamento_id,),
     )
-    for row in cur.fetchall():
+    pagamentos = [dict(row) for row in cur.fetchall()]
+    if not pagamentos:
+        return
+
+    por_parcela: Dict[int, List[Dict[str, object]]] = {}
+    for row in pagamentos:
         parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
         if parcela_num is not None and 1 <= parcela_num <= total_parcelas:
-            novo_mes, novo_ano = _add_meses(mes_inicio, ano_inicio, parcela_num - 1)
-            cur.execute(
-                """
-                UPDATE pagamentos_terceiros_itens
-                SET mes_referencia = ?, ano_referencia = ?
-                WHERE id = ?;
-                """,
-                (novo_mes, novo_ano, int(row["id"])),
-            )
+            por_parcela.setdefault(parcela_num, []).append(row)
             continue
         idx_pag = _indice_competencia(int(row["mes_referencia"]), int(row["ano_referencia"]))
         if idx_pag < idx_inicio or idx_pag > idx_fim:
@@ -676,6 +673,68 @@ def reconciliar_pagamentos_terceiros_parcelada(
                 "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
                 (int(row["id"]),),
             )
+
+    for parcela_num, grupo in por_parcela.items():
+        alvo_mes, alvo_ano = _add_meses(mes_inicio, ano_inicio, parcela_num - 1)
+        no_alvo = [
+            row
+            for row in grupo
+            if int(row["mes_referencia"]) == alvo_mes and int(row["ano_referencia"]) == alvo_ano
+        ]
+        if no_alvo:
+            for row in grupo:
+                if int(row["id"]) != int(no_alvo[0]["id"]):
+                    cur.execute(
+                        "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
+                        (int(row["id"]),),
+                    )
+            continue
+
+        row_manter = max(grupo, key=lambda item: int(item["id"]))
+        for row in grupo:
+            if int(row["id"]) != int(row_manter["id"]):
+                cur.execute(
+                    "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
+                    (int(row["id"]),),
+                )
+        cur.execute(
+            """
+            SELECT id
+            FROM pagamentos_terceiros_itens
+            WHERE pessoa_id = ?
+              AND tipo = 'cartao_parcelada'
+              AND item_id = ?
+              AND mes_referencia = ?
+              AND ano_referencia = ?
+              AND id != ?;
+            """,
+            (
+                int(row_manter["pessoa_id"]),
+                lancamento_id,
+                alvo_mes,
+                alvo_ano,
+                int(row_manter["id"]),
+            ),
+        )
+        if cur.fetchone():
+            cur.execute(
+                "DELETE FROM pagamentos_terceiros_itens WHERE id = ?;",
+                (int(row_manter["id"]),),
+            )
+            continue
+        if (
+            int(row_manter["mes_referencia"]) == alvo_mes
+            and int(row_manter["ano_referencia"]) == alvo_ano
+        ):
+            continue
+        cur.execute(
+            """
+            UPDATE pagamentos_terceiros_itens
+            SET mes_referencia = ?, ano_referencia = ?
+            WHERE id = ?;
+            """,
+            (alvo_mes, alvo_ano, int(row_manter["id"])),
+        )
 
 
 def atualizar_parcelada(
