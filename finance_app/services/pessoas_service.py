@@ -446,7 +446,7 @@ def _carregar_historico_parceladas_pessoa(
     pessoa_id: int,
     parceladas_rows: List[object] | None = None,
 ) -> Dict[int, Dict[str, object]]:
-    """Mapa item_id -> primeiro_idx (competência da parcela 1) e última parcela paga."""
+    """Mapa item_id -> última parcela paga (histórico de pagamentos)."""
     if parceladas_rows is None:
         cur.execute(
             """
@@ -464,7 +464,7 @@ def _carregar_historico_parceladas_pessoa(
         filtros_ids = ", ".join(["?"] * len(ids_parceladas))
         cur.execute(
             f"""
-            SELECT item_id, descricao_item, mes_referencia, ano_referencia
+            SELECT item_id, descricao_item
             FROM pagamentos_terceiros_itens
             WHERE pessoa_id = ?
               AND tipo = 'cartao_parcelada'
@@ -475,27 +475,14 @@ def _carregar_historico_parceladas_pessoa(
         for row in cur.fetchall():
             item_id = int(row["item_id"])
             parcela_num, _ = _extrair_parcela_descricao(row["descricao_item"])
-            info = historico.setdefault(item_id, {"primeiro_idx": None, "ultima_parcela": None})
             if parcela_num is None:
                 continue
-            idx_primeiro = _indice_competencia(
-                int(row["mes_referencia"]),
-                int(row["ano_referencia"]),
-            ) - (parcela_num - 1)
-            if info["primeiro_idx"] is None or idx_primeiro < int(info["primeiro_idx"]):
-                info["primeiro_idx"] = idx_primeiro
+            info = historico.setdefault(item_id, {"ultima_parcela": None})
             if info["ultima_parcela"] is None or parcela_num > int(info["ultima_parcela"]):
                 info["ultima_parcela"] = parcela_num
 
     for row in parceladas_rows:
-        item_id = int(row["id"])
-        info = historico.setdefault(item_id, {"primeiro_idx": None, "ultima_parcela": None})
-        if info["primeiro_idx"] is not None:
-            continue
-        parcela_ref = max(1, min(int(row["parcela_atual"]), int(row["total_parcelas"])))
-        info["primeiro_idx"] = (
-            _indice_competencia(int(row["mes_inicio"]), int(row["ano_inicio"])) - (parcela_ref - 1)
-        )
+        historico.setdefault(int(row["id"]), {"ultima_parcela": None})
 
     return historico
 
@@ -504,8 +491,7 @@ def _primeiro_idx_parcelada_item(
     row: object,
     historico_item: Dict[str, object] | None,
 ) -> int:
-    if historico_item and historico_item.get("primeiro_idx") is not None:
-        return int(historico_item["primeiro_idx"])
+    del historico_item
     return _indice_competencia(int(row["mes_inicio"]), int(row["ano_inicio"]))
 
 
@@ -832,18 +818,15 @@ def listar_contas_pendentes_pessoa(
         """,
         (pessoa_id, pessoa_id, mes_referencia, ano_referencia),
     )
-    base_mes = mes_cartao_referencia if mes_cartao_referencia is not None else mes_referencia
-    base_ano = ano_cartao_referencia if ano_cartao_referencia is not None else ano_referencia
-    idx_base = base_ano * 12 + (base_mes - 1)
     idx_ref = ano_referencia * 12 + (mes_referencia - 1)
-    delta = idx_ref - idx_base
     for r in cur.fetchall():
-        parcela_num = int(r["parcela_atual"]) + delta
+        idx_inicio = _indice_competencia(int(r["mes_inicio"]), int(r["ano_inicio"]))
+        parcela_num = idx_ref - idx_inicio + 1
         total_parcelas = int(r["total_parcelas"])
         restantes = max(total_parcelas - int(r["parcela_atual"]) + 1, 0)
         if int(r["qtd_quitadas"]) >= restantes:
             continue
-        if parcela_num < int(r["parcela_atual"]) or parcela_num > total_parcelas:
+        if parcela_num < 1 or parcela_num > total_parcelas:
             continue
         pendentes.append(
             {
@@ -1303,19 +1286,16 @@ def _listar_contas_status_pessoa_legacy(
             pessoa_id,
         ),
     )
-    base_mes = mes_cartao_referencia if mes_cartao_referencia is not None else mes_referencia
-    base_ano = ano_cartao_referencia if ano_cartao_referencia is not None else ano_referencia
-    idx_base = base_ano * 12 + (base_mes - 1)
     idx_ref = ano_referencia * 12 + (mes_referencia - 1)
-    delta = idx_ref - idx_base
     for r in cur.fetchall():
         parcela_atual = int(r["parcela_atual"])
         total_parcelas = int(r["total_parcelas"])
         restantes = max(total_parcelas - parcela_atual + 1, 0)
         if int(r["qtd_quitadas"]) >= restantes:
             continue
-        parcela_num = parcela_atual + delta
-        if parcela_num < parcela_atual or parcela_num > total_parcelas:
+        idx_inicio = _indice_competencia(int(r["mes_inicio"]), int(r["ano_inicio"]))
+        parcela_num = idx_ref - idx_inicio + 1
+        if parcela_num < 1 or parcela_num > total_parcelas:
             continue
         contas.append(
             {
@@ -1621,7 +1601,7 @@ def calcular_totais_por_pessoa(
         }
         cur.execute(
             f"""
-            SELECT pessoa_id, item_id, descricao_item, mes_referencia, ano_referencia
+            SELECT pessoa_id, item_id, descricao_item
             FROM pagamentos_terceiros_itens
             WHERE tipo = 'cartao_parcelada'
               AND item_id IN ({filtros_ids});
@@ -1637,14 +1617,8 @@ def calcular_totais_por_pessoa(
             chave = (pessoa_id, item_id)
             info = historico_parceladas.setdefault(
                 chave,
-                {"primeiro_idx": None, "ultima_parcela": None},
+                {"ultima_parcela": None},
             )
-            idx_primeiro = _indice_competencia(
-                int(r["mes_referencia"]),
-                int(r["ano_referencia"]),
-            ) - (parcela_num - 1)
-            if info["primeiro_idx"] is None or idx_primeiro < int(info["primeiro_idx"]):
-                info["primeiro_idx"] = idx_primeiro
             if info["ultima_parcela"] is None or parcela_num > int(info["ultima_parcela"]):
                 info["ultima_parcela"] = parcela_num
 
@@ -1674,12 +1648,10 @@ def calcular_totais_por_pessoa(
             if int(quitadas_por_item_pessoa.get((int(pessoa_id), item_id), 0)) >= restantes:
                 continue
 
-        idx_inicio = historico.get("primeiro_idx")
-        if idx_inicio is None:
-            idx_inicio = _indice_competencia(
-                int(row["mes_inicio"]),
-                int(row["ano_inicio"]),
-            )
+        idx_inicio = _indice_competencia(
+            int(row["mes_inicio"]),
+            int(row["ano_inicio"]),
+        )
 
         conta_no_mes = False
         for mes_ref, ano_ref in competencias_cartao:
@@ -1816,18 +1788,11 @@ def calcular_totais_por_pessoa(
         item_id = int(row["id"])
         if (pid, "cartao_parcelada", item_id) not in pagos_mes_keys:
             continue
-        parcela_atual = int(row["parcela_atual"])
         total_parcelas = int(row["total_parcelas"])
-        historico = historico_parceladas.get((pid, item_id), {})
-        idx_inicio = historico.get("primeiro_idx")
-        if idx_inicio is None:
-            restantes = max(total_parcelas - parcela_atual + 1, 0)
-            if int(quitadas_por_item_pessoa.get((pid, item_id), 0)) >= restantes:
-                continue
-            idx_inicio = _indice_competencia(
-                int(row["mes_inicio"]),
-                int(row["ano_inicio"]),
-            )
+        idx_inicio = _indice_competencia(
+            int(row["mes_inicio"]),
+            int(row["ano_inicio"]),
+        )
         delta = idx_ref - int(idx_inicio)
         parcela_num = 1 + delta
         if parcela_num < 1 or parcela_num > total_parcelas:
